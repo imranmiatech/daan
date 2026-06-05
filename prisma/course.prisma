@@ -1,0 +1,85 @@
+model Course {
+    id String @id @default(uuid())
+
+    tutorId String
+    tutor   User   @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+
+    // Basic Info
+    title    String
+    category String
+
+    description String @db.Text
+
+    extraInfos String[]
+
+    topics String[]
+
+    requirement String? @db.Text
+
+    image String?
+
+    curriculums String[]
+
+    
+
+    // Schedule
+    startDate DateTime
+
+    time String
+
+    timeZone String
+
+    classDuration Int
+
+    language String
+
+    courseDuration Int
+
+
+    // Pricing
+    pricePerStudent Float
+
+    minStudent Int
+
+    maxStudent Int
+    
+
+    enrollmentDeadline DateTime
+    // Relations
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+}
+
+
+model Resource {
+    id String @id @default(uuid())
+
+    tutorId String
+    tutor User @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+
+    name String
+    url String
+}
+
+model PaymentInformation {
+  id                 String   @id @default(uuid())
+
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  paymentMethod      String
+
+  legalName          String
+
+  bankName           String?
+
+  bankAccountName    String?
+
+  bankAccountNumber  String?
+
+  routingNumber      String?
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}

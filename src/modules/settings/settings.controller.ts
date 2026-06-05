@@ -38,6 +38,7 @@ export class SettingsController {
     updatePayment(
         @Body() updatePaymentDto: UpdateSettingsDto,
         @CurrentUser() user: any,
+        
     ) {
         return this.settingsService.updatePaymentInfo(user.userId, updatePaymentDto);
     }

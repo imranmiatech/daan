@@ -44,24 +44,38 @@ export class AuthService {
         const hashedPassword =
             await bcrypt.hash(password, 10);
 
+        // Normalize incoming role to Prisma enum values (backend expects STUDENT/TUTOR/ADMIN)
+        const mapToPrismaRole = (r?: string) => {
+          const s = (r || '').toString().toLowerCase();
+          if (s === 'student' || s === 'students' ) return 'STUDENT';
+          if (s === 'tutor' || s === 'teacher' || s === 'teachers') return 'TUTOR';
+          if (s === 'admin' || s === 'administrator') return 'ADMIN';
+          return 'STUDENT';
+        };
+
+        const prismaRole = mapToPrismaRole(role);
+
+        // Decide initial application status: students are auto-approved, tutors stay pending
+        const initialStatus = prismaRole === 'STUDENT' ? 'APPROVED' : 'PENDING';
+
         // Create User + Profile
         const user = await this.prisma.user.create({
-            data: {
-                fullName,
-                email,
-                password: hashedPassword,
-                role,
+          data: {
+            fullName,
+            email,
+            password: hashedPassword,
+            role: prismaRole,
 
-                profile: {
-                    create: {
-                        applicationStatus: "PENDING",
-                    },
-                },
+            profile: {
+              create: {
+                applicationStatus: initialStatus,
+              },
             },
+          },
 
-            include: {
-                profile: true,
-            },
+          include: {
+            profile: true,
+          },
         });
 
         // Remove Password

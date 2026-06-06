@@ -1,0 +1,247 @@
+import {
+  ConnectedSocket,
+  MessageBody,
+  OnGatewayConnection,
+  OnGatewayDisconnect,
+  OnGatewayInit,
+  SubscribeMessage,
+  WebSocketGateway,
+  WebSocketServer,
+  WsException,
+} from '@nestjs/websockets';
+import { UseGuards, Logger } from '@nestjs/common';
+import { Server } from 'socket.io';
+import * as jwt from 'jsonwebtoken';
+
+import { ChatService } from './chat.service';
+import { WsAuthGuard } from './guards/ws-auth.guard';
+import type {
+  AuthenticatedSocket,
+  WsJoinLeavePayload,
+  WsMarkAsReadPayload,
+  WsSendMessagePayload,
+  WsTypingPayload,
+} from './interfaces/chat.interfaces';
+import { MessageType } from '@prisma/client';
+
+@WebSocketGateway({
+  cors: {
+    origin: '*', // Tighten this to your frontend URL in production
+    credentials: true,
+  },
+  namespace: '/chat',
+})
+export class ChatGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
+  @WebSocketServer()
+  server: Server;
+
+  private readonly logger = new Logger(ChatGateway.name);
+
+  constructor(private readonly chatService: ChatService) {}
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  Lifecycle Hooks
+  // ─────────────────────────────────────────────────────────────────────────
+
+  afterInit() {
+    this.logger.log('ChatGateway initialized ✅');
+  }
+
+  /**
+   * On connection: verify JWT from handshake, attach user, log connected client.
+   */
+  handleConnection(client: AuthenticatedSocket) {
+    try {
+      let token: string | undefined = client.handshake?.auth?.token;
+
+      if (!token) {
+        const authHeader = client.handshake?.headers?.authorization;
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+          token = authHeader.split(' ')[1];
+        }
+      }
+
+      if (!token) {
+        throw new WsException('No token provided');
+      }
+
+      const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET!) as {
+        userId: string;
+        email: string;
+        role: string;
+      };
+
+      client.user = decoded;
+      this.logger.log(
+        `Client connected: ${client.id} | User: ${decoded.email} (${decoded.role})`,
+      );
+    } catch {
+      this.logger.warn(`Unauthorized connection attempt: ${client.id}`);
+      client.disconnect();
+    }
+  }
+
+  handleDisconnect(client: AuthenticatedSocket) {
+    this.logger.log(
+      `Client disconnected: ${client.id}${client.user ? ` | User: ${client.user.email}` : ''}`,
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  Room Management
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Client joins a conversation room.
+   * Only participants of the conversation can join.
+   */
+  @UseGuards(WsAuthGuard)
+  @SubscribeMessage('joinConversation')
+  async handleJoinConversation(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: WsJoinLeavePayload,
+  ) {
+    try {
+      await this.chatService.getConversationById(
+        payload.conversationId,
+        client.user.userId,
+      );
+      await client.join(payload.conversationId);
+      this.logger.log(
+        `User ${client.user.email} joined room: ${payload.conversationId}`,
+      );
+      return { event: 'joinedConversation', data: { conversationId: payload.conversationId } };
+    } catch (error) {
+      throw new WsException(error.message || 'Could not join conversation');
+    }
+  }
+
+  /**
+   * Client leaves a conversation room.
+   */
+  @UseGuards(WsAuthGuard)
+  @SubscribeMessage('leaveConversation')
+  async handleLeaveConversation(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: WsJoinLeavePayload,
+  ) {
+    await client.leave(payload.conversationId);
+    this.logger.log(
+      `User ${client.user.email} left room: ${payload.conversationId}`,
+    );
+    return { event: 'leftConversation', data: { conversationId: payload.conversationId } };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  Messaging
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Real-time message send.
+   * Broadcasts the new message to all participants in the room.
+   */
+  @UseGuards(WsAuthGuard)
+  @SubscribeMessage('sendMessage')
+  async handleSendMessage(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: WsSendMessagePayload,
+  ) {
+    try {
+      const message = await this.chatService.sendMessage(
+        payload.conversationId,
+        client.user.userId,
+        {
+          content: payload.content,
+          messageType: payload.messageType ?? MessageType.TEXT,
+          fileUrl: payload.fileUrl,
+        },
+      );
+
+      // Broadcast to all sockets in the conversation room (including sender)
+      this.server.to(payload.conversationId).emit('newMessage', message);
+
+      return { event: 'messageSent', data: message };
+    } catch (error) {
+      throw new WsException(error.message || 'Failed to send message');
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  Typing Indicators
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Broadcast typing indicator to other participants in the room.
+   */
+  @UseGuards(WsAuthGuard)
+  @SubscribeMessage('typing')
+  handleTyping(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: WsTypingPayload,
+  ) {
+    // Broadcast to everyone in room EXCEPT the sender
+    client.to(payload.conversationId).emit('userTyping', {
+      userId: client.user.userId,
+      email: client.user.email,
+      conversationId: payload.conversationId,
+    });
+  }
+
+  /**
+   * Broadcast typing stopped indicator.
+   */
+  @UseGuards(WsAuthGuard)
+  @SubscribeMessage('stopTyping')
+  handleStopTyping(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: WsTypingPayload,
+  ) {
+    client.to(payload.conversationId).emit('userStoppedTyping', {
+      userId: client.user.userId,
+      conversationId: payload.conversationId,
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  Read Receipts
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Mark conversation as read and notify other participants.
+   */
+  @UseGuards(WsAuthGuard)
+  @SubscribeMessage('markAsRead')
+  async handleMarkAsRead(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: WsMarkAsReadPayload,
+  ) {
+    try {
+      await this.chatService.markAsRead(
+        payload.conversationId,
+        client.user.userId,
+      );
+
+      // Notify other participants that this user has read the messages
+      client.to(payload.conversationId).emit('messageRead', {
+        conversationId: payload.conversationId,
+        userId: client.user.userId,
+        readAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      throw new WsException(error.message || 'Failed to mark as read');
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  Gateway Helper (called by ChatController after REST send)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Emit a new message event to a room from outside the gateway (e.g., REST controller).
+   */
+  emitNewMessage(conversationId: string, message: any) {
+    this.server.to(conversationId).emit('newMessage', message);
+  }
+}

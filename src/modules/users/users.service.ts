@@ -6,6 +6,15 @@ import { ApplicationStatus } from '@prisma/client';
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
+
+  async findAll() {
+    return this.prisma.user.findMany({
+      include: {
+        profile: true,
+      },
+    });
+  }
+
   async updateProfileStatus(profileId: string, status: ApplicationStatus) {
     const profile = await this.prisma.userProfile.findUnique({
       where: { id: profileId },

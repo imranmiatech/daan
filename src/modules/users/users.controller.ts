@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { AuthGuard } from '../auth/guards/auth.guard';
@@ -10,7 +10,30 @@ import { UpdateStatusDto, UpdateStatusResponseDto } from './dto/update-status.dt
 @ApiTags('Users')
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(private readonly usersService: UsersService) { }
+
+  @Get()
+  @ApiOperation({
+    summary: 'Get all users with their profiles',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'List of users retrieved successfully.',
+  })
+  getAllUsers() {
+    return this.usersService.findAll();
+  }
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token.',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Requires ADMIN role.',
+  })
+  findAll() {
+    return this.usersService.findAll();
+  }
 
   @Patch('profiles/:profileId/status')
   @UseGuards(AuthGuard, RolesGuard)

@@ -1,3 +1,6 @@
+// Base Prisma schema (contains datasource, generator, enums and core models)
+// This file is concatenated with files in `prisma/models/*.prisma` to produce `prisma/schema.prisma`.
+
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
@@ -23,6 +26,7 @@ enum ApplicationStatus {
   APPROVED
   REJECTED
 }
+
 
 enum DayOfWeek {
   MONDAY
@@ -50,7 +54,161 @@ model User {
   courses         Course[]
   resources       Resource[]
   paymentInfo     PaymentInformation?
+
+  // Chat relations
+  conversations   ConversationParticipant[]
+  sentMessages    Message[]
+
+  // Review relations (student gives reviews)
+  givenReviews    Review[]    @relation("StudentReviews")
 }
+// Profile and review models live in prisma/models/profile.prisma and prisma/models/review.prisma
+
+
+// ----- chat.prisma -----
+
+// Chat Module Schema
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+}
+
+model Conversation {
+  id        String   @id @default(uuid())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  participants ConversationParticipant[]
+  messages     Message[]
+}
+
+model ConversationParticipant {
+  id             String       @id @default(uuid())
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  joinedAt       DateTime     @default(now())
+  lastReadAt     DateTime?
+
+  @@unique([conversationId, userId])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  content        String       @db.Text
+  messageType    MessageType  @default(TEXT)
+  fileUrl        String?
+
+  isEdited       Boolean      @default(false)
+  isDeleted      Boolean      @default(false)
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+// ----- course.prisma -----
+
+model Course {
+    id String @id @default(uuid())
+
+    tutorId String
+    tutor   User   @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+
+    // Basic Info
+    title    String
+    category String
+
+    description String @db.Text
+
+    extraInfos String[]
+
+    topics String[]
+
+    requirement String? @db.Text
+
+    image String?
+
+    curriculums String[]
+
+    
+
+    // Schedule
+    startDate DateTime
+
+    time String
+
+    timeZone String
+
+    classDuration Int
+
+    language String
+
+    courseDuration Int
+
+
+    // Pricing
+    pricePerStudent Float
+
+    minStudent Int
+
+    maxStudent Int
+    
+
+    enrollmentDeadline DateTime
+    // Relations
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+}
+
+
+model Resource {
+    id String @id @default(uuid())
+
+    tutorId String
+    tutor User @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+
+    name String
+    url String
+}
+
+model PaymentInformation {
+  id                 String   @id @default(uuid())
+
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  paymentMethod      String
+
+  legalName          String
+
+  bankName           String?
+
+  bankAccountName    String?
+
+  bankAccountNumber  String?
+
+  routingNumber      String?
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+// ----- profile.prisma -----
 
 model UserProfile {
   id                String            @id @default(uuid())
@@ -79,6 +237,10 @@ model UserProfile {
   applicationStatus ApplicationStatus @default(DRAFT)
   education         Education[]
   availability      Availability[]
+
+  // Review relations (tutor receives reviews on their profile)
+  reviews           Review[]          @relation("TutorReviews")
+  averageRating     Float?            // Auto-calculated from reviews
 
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
@@ -110,4 +272,30 @@ model Availability {
   
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
+}
+
+// ----- review.prisma -----
+
+model Review {
+  id             String   @id @default(uuid())
+
+  // Rating: 1–5 stars
+  rating         Int
+
+  // Optional text review
+  comment        String?  @db.Text
+
+  // The student who wrote the review
+  reviewerId     String
+  reviewer       User        @relation("StudentReviews", fields: [reviewerId], references: [id], onDelete: Cascade)
+
+  // The tutor's profile where the review is stored
+  tutorProfileId String
+  tutorProfile   UserProfile @relation("TutorReviews", fields: [tutorProfileId], references: [id], onDelete: Cascade)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // One student can only review one tutor once
+  @@unique([reviewerId, tutorProfileId])
 }

@@ -1,0 +1,63 @@
+model UserProfile {
+  id                String            @id @default(uuid())
+  userId            String            @unique
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Basic Information
+  country           String?
+  city              String?
+  // Profile Setup details
+  avatarUrl         String?
+  bio               String? 
+  yearOfExperience  Int?    
+  pricePerHour      Float?
+  languageExpertise String?        
+  aboutMe           String?           // For 'About You' rich text area
+  teachingCategory  String?           // Main subject/category
+  teachingSkills     String[]          // Pills like "Warm & friendly", "Strict & structured"
+        // For 'Teaching Skill' list
+  
+  // Session Settings
+  sessionDuration   Int?              @default(60) // in minutes
+  videoUrl          String?           // Intro video link
+  
+  // Status and Relations
+  applicationStatus ApplicationStatus @default(DRAFT)
+  education         Education[]
+  availability      Availability[]
+
+  // Review relations (tutor receives reviews on their profile)
+  reviews           Review[]          @relation("TutorReviews")
+  averageRating     Float?            // Auto-calculated from reviews
+
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+}
+
+model Education {
+  id           String      @id @default(uuid())
+  profileId    String
+  profile      UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  institution  String?      // School or university
+  country      String?
+  city         String?
+  degree       String?     // Name of degree
+  passingYear  Int?
+  
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model Availability {
+  id        String      @id @default(uuid())
+  profileId String
+  profile   UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  dayOfWeek DayOfWeek
+  startTime String      // e.g. "09:00"
+  endTime   String      // e.g. "17:00"
+  
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+}

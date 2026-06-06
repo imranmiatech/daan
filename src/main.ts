@@ -18,10 +18,15 @@ async function bootstrap() {
 
   SwaggerModule.setup('api-docs', app, document);
 
+  // Enable CORS for frontend (default to localhost:5173)
+  const frontend = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const origins = frontend.includes(',') ? frontend.split(',').map(s => s.trim()) : frontend;
+  app.enableCors({ origin: origins, credentials: true });
+
   await app.listen(process.env.PORT ?? 5000);
 
   console.log(
-    `Swagger running at: http://localhost:${process.env.PORT ?? 5000}/api-docs`,
+    `Swagger running at: http://localhost:${process.env.PORT ?? 5000}/docs`,
   );
 }
 

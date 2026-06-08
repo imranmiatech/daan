@@ -12,12 +12,13 @@ import { ResourceModule } from './modules/resource/resource.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { ReviewModule } from './modules/review/review.module';
-
+import { RedisModule } from './modules/common/redis/redis.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    RedisModule,
     AuthModule,
     UsersModule,
     MailModule,

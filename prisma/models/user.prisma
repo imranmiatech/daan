@@ -1,0 +1,22 @@
+model User {
+  id                 String                    @id @default(uuid())
+  fullName           String
+  email              String                    @unique
+  password           String
+  createdAt          DateTime                  @default(now())
+  isEmailVerified    Boolean                   @default(false)
+  role               Role                      @default(STUDENT)
+  updatedAt          DateTime                  @updatedAt
+  refreshTokenHash   String?
+  otpCode            String?
+  otpExpires         DateTime?
+  conversations      ConversationParticipant[]
+  courses            Course[]
+  courseCompletions  CourseCompletion[]
+  curriculumProgress CurriculumProgress[]
+  sentMessages       Message[]
+  paymentInfo        PaymentInformation?
+  resources          Resource[]
+  givenReviews       Review[]                  @relation("StudentReviews")
+  profile            UserProfile?
+}

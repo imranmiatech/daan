@@ -1,8 +1,20 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Req, Query } from '@nestjs/common';
-import { ReviewService } from './review.service';
-import { CreateReviewDto } from './dto/create-review.dto';
-import { UpdateReviewDto } from './dto/update-review.dto';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard } from '../auth/guards/auth.guard';
+import { CreateReviewDto } from './dto/create-review.dto';
+import { TutorReviewListParamDto } from './dto/tutor-review-list-param.dto';
+import { UpdateReviewDto } from './dto/update-review.dto';
+import { ReviewService } from './review.service';
 
 @Controller('review')
 export class ReviewController {
@@ -10,15 +22,11 @@ export class ReviewController {
 
   @Post()
   @UseGuards(AuthGuard)
-  create(@Req() req: any, @Body() createReviewDto: CreateReviewDto) {
-    const userId = req.user.userId;
-    try {
-      return this.reviewService.create(userId, createReviewDto);
-    } catch (err) {
-      const e = err as any;
-      console.error('[ReviewController.create] error:', e?.stack ?? e);
-      throw err;
-    }
+  create(
+    @Req() req: { user: { userId: string } },
+    @Body() createReviewDto: CreateReviewDto,
+  ) {
+    return this.reviewService.create(req.user.userId, createReviewDto);
   }
 
   @Get()
@@ -26,20 +34,31 @@ export class ReviewController {
     return this.reviewService.findAll(tutorProfileId);
   }
 
-  // review.controller.ts
+  @Get('tutor/:tutorProfileId')
+  findTutorReviewList(
+    @Param() params: TutorReviewListParamDto,
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '5',
+  ) {
+    return this.reviewService.findTutorReviewList(
+      params.tutorProfileId,
+      Number(page),
+      Number(limit),
+    );
+  }
 
-@Get(':id')
-findOne(@Param('id') id: string) {
-  return this.reviewService.findOne(id); // ✅ removed +
-}
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.reviewService.findOne(id);
+  }
 
-@Patch(':id')
-update(@Param('id') id: string, @Body() updateReviewDto: UpdateReviewDto) {
-  return this.reviewService.update(id, updateReviewDto); // ✅ removed +
-}
+  @Patch(':id')
+  update(@Param('id') id: string, @Body() updateReviewDto: UpdateReviewDto) {
+    return this.reviewService.update(id, updateReviewDto);
+  }
 
-@Delete(':id')
-remove(@Param('id') id: string) {
-  return this.reviewService.remove(id); // ✅ removed +
-}
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.reviewService.remove(id);
+  }
 }

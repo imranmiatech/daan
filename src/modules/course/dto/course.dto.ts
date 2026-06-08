@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsDateString,
+  IsEnum,
   IsNumber,
   IsOptional,
   IsString,
@@ -9,19 +10,19 @@ import {
 
 export class CreateCourseDto {
   @IsString()
-  title: string;
+  title!: string;
 
   @IsString()
-  category: string;
+  category!: string;
 
   @IsString()
-  description: string;
+  description!: string;
 
   @IsArray()
-  extraInfos: string[];
+  extraInfos!: string[];
 
   @IsArray()
-  topics: string[];
+  topics!: string[];
 
   @IsOptional()
   @IsString()
@@ -32,37 +33,66 @@ export class CreateCourseDto {
   image?: string;
 
   @IsArray()
-  curriculums: string[];
+  curriculums!: string[];
 
   @IsDateString()
-  startDate: string;
+  startDate!: string;
 
   @IsString()
-  time: string;
+  time!: string;
 
   @IsString()
-  timeZone: string;
+  timeZone!: string;
 
   @IsNumber()
   @Min(1)
-  classDuration: number;
+  classDuration!: number;
 
   @IsString()
-  language: string;
+  language!: string;
 
   @IsNumber()
   @Min(1)
-  courseDuration: number;
+  courseDuration!: number;
 
   @IsNumber()
-  pricePerStudent: number;
+  pricePerStudent!: number;
 
   @IsNumber()
-  minStudent: number;
+  minStudent!: number;
 
   @IsNumber()
-  maxStudent: number;
+  maxStudent!: number;
 
   @IsDateString()
-  enrollmentDeadline: string;
+  enrollmentDeadline!: string;
+}
+
+export enum CourseSubjectFilter {
+  ALL = 'All Subjects',
+  PROGRAMMING = 'Programming',
+  LANGUAGES = 'Languages',
+  MATHEMATICS = 'Mathematics',
+  MUSIC = 'MUSIC',
+  SCIENCE = 'SCIENCE',
+  BUSINESS = 'BUSINESS',
+  DESIGN = 'DESIGN',
+  WRITING = 'WRITTING',
+}
+
+export enum CoursePriceFilter {
+  ALL = 'All Prices',
+  ZERO_TO_FORTY = '$0 - $40/hr',
+  FORTY_TO_SIXTY = '$40 - $60/hr',
+  SIXTY_PLUS = '$60+/hr',
+}
+
+export class UpcomingCourseQueryDto {
+  @IsOptional()
+  @IsEnum(CourseSubjectFilter)
+  subject?: CourseSubjectFilter;
+
+  @IsOptional()
+  @IsEnum(CoursePriceFilter)
+  price?: CoursePriceFilter;
 }

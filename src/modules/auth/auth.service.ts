@@ -1,99 +1,96 @@
 import {
-    BadRequestException,
-    Injectable,
-    UnauthorizedException,
-} from "@nestjs/common";
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 
-import * as bcrypt from "bcrypt";
-import { PrismaService } from "src/prisma/prisma.service";
-import { LoginDto, RegisterDto } from "./dto/auth.dto";
+import * as bcrypt from 'bcrypt';
+import { PrismaService } from 'src/prisma/prisma.service';
+import { LoginDto, RegisterDto } from './dto/auth.dto';
 import * as jwt from 'jsonwebtoken';
-import { MailService } from "../common/mail/mail.service";
+import { MailService } from '../common/mail/mail.service';
+import { UpstashRedisService } from '../common/redis/upstash-redis.service';
 
+const PASSWORD_RESET_OTP_TTL_SECONDS = 10 * 60;
+const PASSWORD_RESET_COOLDOWN_SECONDS = 60;
+
+interface PasswordResetOtpPayload {
+  userId: string;
+  otpHash: string;
+}
 
 @Injectable()
 export class AuthService {
-    constructor(
-        private readonly prisma: PrismaService,
-        private readonly mailService: MailService,
-    ) { }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mailService: MailService,
+    private readonly redis: UpstashRedisService,
+  ) {}
 
-    async register(registerDto: RegisterDto) {
-        const {
-            fullName,
-            email,
-            password,
-            role,
-        } = registerDto;
+  async register(registerDto: RegisterDto) {
+    const { fullName, email, password, role } = registerDto;
 
-        // Check Existing User
-        const existingUser =
-            await this.prisma.user.findUnique({
-                where: {
-                    email,
-                },
-            });
+    // Check Existing User
+    const existingUser = await this.prisma.user.findUnique({
+      where: {
+        email,
+      },
+    });
 
-        if (existingUser) {
-            throw new BadRequestException(
-                "User already exists",
-            );
-        }
-
-        // Hash Password
-        const hashedPassword =
-            await bcrypt.hash(password, 10);
-
-        // Normalize incoming role to Prisma enum values (backend expects STUDENT/TUTOR/ADMIN)
-        const mapToPrismaRole = (r?: string) => {
-          const s = (r || '').toString().toLowerCase();
-          if (s === 'student' || s === 'students' ) return 'STUDENT';
-          if (s === 'tutor' || s === 'teacher' || s === 'teachers') return 'TUTOR';
-          if (s === 'admin' || s === 'administrator') return 'ADMIN';
-          return 'STUDENT';
-        };
-
-        const prismaRole = mapToPrismaRole(role);
-
-        // Decide initial application status: students are auto-approved, tutors stay pending
-        const initialStatus = prismaRole === 'STUDENT' ? 'APPROVED' : 'PENDING';
-
-        // Create User + Profile
-        const user = await this.prisma.user.create({
-          data: {
-            fullName,
-            email,
-            password: hashedPassword,
-            role: prismaRole,
-
-            profile: {
-              create: {
-                applicationStatus: initialStatus,
-              },
-            },
-          },
-
-          include: {
-            profile: true,
-          },
-        });
-
-        // Remove Password
-        const { password: _, ...result } =
-            user;
-
-        return {
-            success: true,
-            message:
-                "Registration successful",
-            data: result,
-        };
+    if (existingUser) {
+      throw new BadRequestException('User already exists');
     }
 
+    // Hash Password
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    /////------------Login -------------//
+    // Normalize incoming role to Prisma enum values (backend expects STUDENT/TUTOR/ADMIN)
+    const mapToPrismaRole = (r?: string) => {
+      const s = (r || '').toString().toLowerCase();
+      if (s === 'student' || s === 'students') return 'STUDENT';
+      if (s === 'tutor' || s === 'teacher' || s === 'teachers') return 'TUTOR';
+      if (s === 'admin' || s === 'administrator') return 'ADMIN';
+      return 'STUDENT';
+    };
 
-    async login(loginDto: LoginDto) {
+    const prismaRole = mapToPrismaRole(role);
+
+    // Decide initial application status: students are auto-approved, tutors stay pending
+    const initialStatus = prismaRole === 'STUDENT' ? 'APPROVED' : 'PENDING';
+
+    // Create User + Profile
+    const user = await this.prisma.user.create({
+      data: {
+        fullName,
+        email,
+        password: hashedPassword,
+        role: prismaRole,
+
+        profile: {
+          create: {
+            applicationStatus: initialStatus,
+          },
+        },
+      },
+
+      include: {
+        profile: true,
+      },
+    });
+
+    // Remove Password
+    const { password: _, ...result } = user;
+
+    return {
+      success: true,
+      message: 'Registration successful',
+      data: result,
+    };
+  }
+
+  /////------------Login -------------//
+
+  async login(loginDto: LoginDto) {
     const { email, password } = loginDto;
 
     // Find User
@@ -107,28 +104,21 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException(
-        'Invalid email or password',
-      );
+      throw new UnauthorizedException('Invalid email or password');
     }
 
     // Compare Password
-    const isPasswordMatched =
-      await bcrypt.compare(
-        password,
-        user.password,
-      );
+    const isPasswordMatched = await bcrypt.compare(password, user.password);
 
     if (!isPasswordMatched) {
-      throw new UnauthorizedException(
-        'Invalid email or password',
-      );
+      throw new UnauthorizedException('Invalid email or password');
     }
 
-
-
     // Application Status Check (Admins are bypassable)
-    if (user.role !== 'ADMIN' && user.profile?.applicationStatus !== 'APPROVED') {
+    if (
+      user.role !== 'ADMIN' &&
+      user.profile?.applicationStatus !== 'APPROVED'
+    ) {
       throw new UnauthorizedException(
         `Your application status is ${user.profile?.applicationStatus ?? 'PENDING'}. Please wait for admin approval.`,
       );
@@ -159,11 +149,7 @@ export class AuthService {
     );
 
     // Hash Refresh Token
-    const refreshTokenHash =
-      await bcrypt.hash(
-        refreshToken,
-        10,
-      );
+    const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
 
     // Save Refresh Token Hash
     await this.prisma.user.update({
@@ -190,64 +176,115 @@ export class AuthService {
   }
 
   async forgotPassword(email: string) {
+    const normalizedEmail = this.normalizeEmail(email);
     const user = await this.prisma.user.findUnique({
-      where: { email },
+      where: { email: normalizedEmail },
     });
 
     if (!user) {
       return { message: 'If email exists, OTP sent' };
     }
 
+    const cooldownKey = this.getPasswordResetCooldownKey(normalizedEmail);
+    const existingCooldown = await this.redis.get(cooldownKey);
+
+    if (existingCooldown) {
+      return {
+        message: 'OTP already sent. Please wait before requesting again',
+      };
+    }
+
     // 1. generate 6 digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = await bcrypt.hash(otp, 10);
 
-    // 2. save in DB with expiry (10 min)
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: {
-        otpCode: otp,
-        otpExpires: new Date(Date.now() + 10 * 60 * 1000),
-      },
-    });
+    // 2. save hashed OTP in Redis with automatic expiry
+    await this.redis.set(
+      this.getPasswordResetOtpKey(normalizedEmail),
+      JSON.stringify({ userId: user.id, otpHash }),
+      PASSWORD_RESET_OTP_TTL_SECONDS,
+    );
+    await this.redis.set(cooldownKey, '1', PASSWORD_RESET_COOLDOWN_SECONDS);
 
     // 3. send email
-    await this.mailService.sendOtp(email, otp);
+    await this.mailService.sendOtp(normalizedEmail, otp);
 
     return { message: 'OTP sent to email' };
   }
 
   async resetPassword(email: string, otp: string, newPassword: string) {
+    const normalizedEmail = this.normalizeEmail(email);
     const user = await this.prisma.user.findUnique({
-      where: { email },
+      where: { email: normalizedEmail },
     });
 
-    if (!user || !user.otpCode || !user.otpExpires) {
+    if (!user) {
       throw new BadRequestException('Invalid request');
     }
 
-    // 1. check expiry
-    if (user.otpExpires < new Date()) {
-      throw new BadRequestException('OTP expired');
+    const otpKey = this.getPasswordResetOtpKey(normalizedEmail);
+    const storedOtp = await this.redis.get(otpKey);
+
+    if (!storedOtp) {
+      throw new BadRequestException('OTP expired or invalid');
     }
 
-    // 2. compare OTP
-    if (user.otpCode !== otp) {
+    const otpPayload = this.parsePasswordResetOtp(storedOtp);
+
+    if (!otpPayload || otpPayload.userId !== user.id) {
+      throw new BadRequestException('Invalid request');
+    }
+
+    const isOtpMatched = await bcrypt.compare(otp, otpPayload.otpHash);
+
+    if (!isOtpMatched) {
       throw new BadRequestException('Invalid OTP');
     }
 
-    // 3. hash new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // 4. update user
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
         password: hashedPassword,
-        otpCode: null,
-        otpExpires: null,
       },
     });
 
+    await this.redis.del(otpKey);
+    await this.redis.del(this.getPasswordResetCooldownKey(normalizedEmail));
+
     return { message: 'Password reset successful' };
+  }
+
+  private normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+  }
+
+  private getPasswordResetOtpKey(email: string): string {
+    return `password-reset:otp:${email}`;
+  }
+
+  private getPasswordResetCooldownKey(email: string): string {
+    return `password-reset:cooldown:${email}`;
+  }
+
+  private parsePasswordResetOtp(value: string): PasswordResetOtpPayload | null {
+    try {
+      const parsed = JSON.parse(value) as Partial<PasswordResetOtpPayload>;
+
+      if (
+        typeof parsed.userId === 'string' &&
+        typeof parsed.otpHash === 'string'
+      ) {
+        return {
+          userId: parsed.userId,
+          otpHash: parsed.otpHash,
+        };
+      }
+    } catch {
+      return null;
+    }
+
+    return null;
   }
 }

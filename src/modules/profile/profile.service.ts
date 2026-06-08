@@ -1,41 +1,50 @@
-import {
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
-import {
-  ApplicationStatus,
-} from '@prisma/client';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { ApplicationStatus } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { UpdateProfileDto } from './dto/profile.dto';
 
 @Injectable()
 export class ProfileService {
-  constructor(
-    private readonly prisma: PrismaService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async getProfile(userId: string) {
-    const profile = await this.prisma.userProfile.findUnique({
-      where: { userId },
-      include: {
-        education: true,
-        availability: true,
-        user: {
-          select: {
-            id: true,
-            email: true,
-            fullName: true,
-            role: true,
+    const [profile, completedCourses] = await this.prisma.$transaction([
+      this.prisma.userProfile.findUnique({
+        where: { userId },
+        include: {
+          education: true,
+          availability: true,
+          user: {
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+              role: true,
+            },
           },
         },
-      },
-    });
+      }),
+      this.prisma.courseCompletion.findMany({
+        where: {
+          course: {
+            tutorId: userId,
+          },
+        },
+        distinct: ['courseId'],
+        select: {
+          courseId: true,
+        },
+      }),
+    ]);
 
     if (!profile) {
       throw new NotFoundException('Profile not found');
     }
 
-    return profile;
+    return {
+      ...profile,
+      completedCoursesCount: completedCourses.length,
+    };
   }
 
   async updateProfile(userId: string, dto: UpdateProfileDto) {
@@ -137,21 +146,15 @@ export class ProfileService {
     });
   }
 
-  async updateApplicationStatus(
-    profileId: string,
-    status: ApplicationStatus,
-  ) {
-    const profile =
-      await this.prisma.userProfile.findUnique({
-        where: {
-          id: profileId,
-        },
-      });
+  async updateApplicationStatus(profileId: string, status: ApplicationStatus) {
+    const profile = await this.prisma.userProfile.findUnique({
+      where: {
+        id: profileId,
+      },
+    });
 
     if (!profile) {
-      throw new NotFoundException(
-        'Profile not found',
-      );
+      throw new NotFoundException('Profile not found');
     }
 
     return this.prisma.userProfile.update({
@@ -163,4 +166,45 @@ export class ProfileService {
       },
     });
   }
+  async getTutorAvailability(tutorId: string, courseId?: string) {
+  // Support passing either a userId (users.id) or a profile id
+  let profile = await this.prisma.userProfile.findUnique({
+    where: { userId: tutorId },
+  });
+
+  if (!profile) {
+    profile = await this.prisma.userProfile.findUnique({
+      where: { id: tutorId },
+    });
+  }
+
+  if (!profile) {
+    throw new NotFoundException('Tutor profile not found');
+  }
+
+  const availabilities = await this.prisma.availability.findMany({
+    where: {
+      profileId: profile.id,
+    },
+    orderBy: {
+      dayOfWeek: 'asc',
+    },
+  });
+
+  if (courseId) {
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId },
+      select: { timeZone: true },
+    });
+
+    if (course && course.timeZone) {
+      return availabilities.map((a) => ({
+        ...a,
+        timezone: (a as any).timezone ?? course.timeZone,
+      }));
+    }
+  }
+
+  return availabilities;
+}
 }

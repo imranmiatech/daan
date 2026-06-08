@@ -1,13 +1,12 @@
-import { Controller, Get, Patch, Body, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Req, UseGuards, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { ProfileService } from './profile.service';
-import { UpdateProfileDto } from './dto/profile.dto';
 import { AuthGuard } from '../auth/guards/auth.guard';
 
 @ApiTags('Profile')
 @Controller('profile')
 export class ProfileController {
-  constructor(private readonly profileService: ProfileService) {}
+  constructor(private readonly profileService: ProfileService) { }
 
   @Get('my')
   @UseGuards(AuthGuard)
@@ -20,18 +19,16 @@ export class ProfileController {
     return this.profileService.getProfile(userId);
   }
 
-  @Patch('my')
-  @UseGuards(AuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update logged-in user profile details & user display name' })
-  @ApiResponse({ status: 200, description: 'Profile updated successfully.' })
-  @ApiResponse({ status: 400, description: 'Bad Request.' })
-  @ApiResponse({ status: 401, description: 'Unauthorized.' })
-  updateMyProfile(
-    @Req() req: any,
-    @Body() updateProfileDto: UpdateProfileDto,
+  @Get('tutor/:userId')
+  getTutorProfile(@Param('userId') userId: string) {
+    return this.profileService.getProfile(userId);
+  }
+
+  @Get(':tutorId/availability')
+  getTutorAvailability(
+    @Param('tutorId') tutorId: string,
+    @Query('courseId') courseId?: string,
   ) {
-    const userId = req.user.userId;
-    return this.profileService.updateProfile(userId, updateProfileDto);
+    return this.profileService.getTutorAvailability(tutorId, courseId);
   }
 }

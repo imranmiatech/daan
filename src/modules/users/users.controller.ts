@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { AuthGuard } from '../auth/guards/auth.guard';
@@ -6,6 +14,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UsersService } from './users.service';
 import { UpdateStatusDto, UpdateStatusResponseDto } from './dto/update-status.dto';
+import { TutorQueryDto } from './dto/tutor-query.dto';
 
 @ApiTags('Users')
 @Controller('users')
@@ -23,6 +32,25 @@ export class UsersController {
   getAllUsers() {
     return this.usersService.findAll();
   }
+
+  @Get('tutors')
+  @ApiOperation({
+    summary: 'Get tutors sorted by highest rating with pagination',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Paginated tutor list retrieved successfully.',
+  })
+  getAllTutors(
+    @Query() query: TutorQueryDto,
+  ) {
+    return this.usersService.findAllTutors(query.page);
+  }
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.usersService.findOne(id);
+  }
+
   @ApiResponse({
     status: 401,
     description: 'Unauthorized - Invalid or missing token.',

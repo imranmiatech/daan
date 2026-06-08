@@ -1,23 +1,14 @@
 model Review {
-  id             String   @id @default(uuid())
-
-  // Rating: 1–5 stars
+  id             String      @id @default(uuid())
   rating         Int
-
-  // Optional text review
-  comment        String?  @db.Text
-
-  // The student who wrote the review
+  comment        String?
   reviewerId     String
-  reviewer       User        @relation("StudentReviews", fields: [reviewerId], references: [id], onDelete: Cascade)
-
-  // The tutor's profile where the review is stored
   tutorProfileId String
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  reviewer       User        @relation("StudentReviews", fields: [reviewerId], references: [id], onDelete: Cascade)
   tutorProfile   UserProfile @relation("TutorReviews", fields: [tutorProfileId], references: [id], onDelete: Cascade)
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  // One student can only review one tutor once
   @@unique([reviewerId, tutorProfileId])
+  @@index([tutorProfileId])
 }

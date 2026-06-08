@@ -24,6 +24,12 @@ import type {
 } from './interfaces/chat.interfaces';
 import { MessageType } from '@prisma/client';
 
+interface JwtUserPayload {
+  userId: string;
+  email: string;
+  role: string;
+}
+
 @WebSocketGateway({
   cors: {
     origin: '*', // Tighten this to your frontend URL in production
@@ -35,7 +41,7 @@ export class ChatGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   private readonly logger = new Logger(ChatGateway.name);
 
@@ -46,7 +52,7 @@ export class ChatGateway
   // ─────────────────────────────────────────────────────────────────────────
 
   afterInit() {
-    this.logger.log('ChatGateway initialized ✅');
+    this.logger.log('ChatGateway initialized');
   }
 
   /**
@@ -54,24 +60,16 @@ export class ChatGateway
    */
   handleConnection(client: AuthenticatedSocket) {
     try {
-      let token: string | undefined = client.handshake?.auth?.token;
-
-      if (!token) {
-        const authHeader = client.handshake?.headers?.authorization;
-        if (authHeader && authHeader.startsWith('Bearer ')) {
-          token = authHeader.split(' ')[1];
-        }
-      }
+      const token = this.extractToken(client);
 
       if (!token) {
         throw new WsException('No token provided');
       }
 
-      const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET!) as {
-        userId: string;
-        email: string;
-        role: string;
-      };
+      const decoded = jwt.verify(
+        token,
+        process.env.JWT_ACCESS_SECRET!,
+      ) as JwtUserPayload;
 
       client.user = decoded;
       this.logger.log(
@@ -112,9 +110,14 @@ export class ChatGateway
       this.logger.log(
         `User ${client.user.email} joined room: ${payload.conversationId}`,
       );
-      return { event: 'joinedConversation', data: { conversationId: payload.conversationId } };
-    } catch (error) {
-      throw new WsException(error.message || 'Could not join conversation');
+      return {
+        event: 'joinedConversation',
+        data: { conversationId: payload.conversationId },
+      };
+    } catch (error: unknown) {
+      throw new WsException(
+        this.getErrorMessage(error, 'Could not join conversation'),
+      );
     }
   }
 
@@ -131,7 +134,10 @@ export class ChatGateway
     this.logger.log(
       `User ${client.user.email} left room: ${payload.conversationId}`,
     );
-    return { event: 'leftConversation', data: { conversationId: payload.conversationId } };
+    return {
+      event: 'leftConversation',
+      data: { conversationId: payload.conversationId },
+    };
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -163,8 +169,10 @@ export class ChatGateway
       this.server.to(payload.conversationId).emit('newMessage', message);
 
       return { event: 'messageSent', data: message };
-    } catch (error) {
-      throw new WsException(error.message || 'Failed to send message');
+    } catch (error: unknown) {
+      throw new WsException(
+        this.getErrorMessage(error, 'Failed to send message'),
+      );
     }
   }
 
@@ -229,8 +237,10 @@ export class ChatGateway
         userId: client.user.userId,
         readAt: new Date().toISOString(),
       });
-    } catch (error) {
-      throw new WsException(error.message || 'Failed to mark as read');
+    } catch (error: unknown) {
+      throw new WsException(
+        this.getErrorMessage(error, 'Failed to mark as read'),
+      );
     }
   }
 
@@ -243,5 +253,36 @@ export class ChatGateway
    */
   emitNewMessage(conversationId: string, message: any) {
     this.server.to(conversationId).emit('newMessage', message);
+  }
+
+  private extractToken(client: AuthenticatedSocket): string | undefined {
+    const auth = client.handshake?.auth as Record<string, unknown> | undefined;
+    const authToken = auth?.token;
+
+    if (typeof authToken === 'string' && authToken.length > 0) {
+      return authToken;
+    }
+
+    const authHeader = client.handshake?.headers?.authorization;
+    if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+      return authHeader.split(' ')[1];
+    }
+
+    return undefined;
+  }
+
+  private getErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof WsException) {
+      const wsError = error.getError();
+      if (typeof wsError === 'string') {
+        return wsError;
+      }
+    }
+
+    if (error instanceof Error && error.message.length > 0) {
+      return error.message;
+    }
+
+    return fallback;
   }
 }

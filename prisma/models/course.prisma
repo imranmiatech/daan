@@ -1,85 +1,58 @@
 model Course {
-    id String @id @default(uuid())
+  id                 String               @id @default(uuid())
+  tutorId            String
+  title              String
+  category           String
+  description        String
+  extraInfos         String[]
+  topics             String[]
+  requirement        String?
+  image              String?
+  curriculums        String[]
+  startDate          DateTime
+  time               String
+  timeZone           String
+  classDuration      Int
+  language           String
+  courseDuration     Int
+  pricePerStudent    Float
+  minStudent         Int
+  maxStudent         Int
+  enrollmentDeadline DateTime
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  tutor              User                 @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  courseCompletions  CourseCompletion[]
+  curriculumProgress CurriculumProgress[]
 
-    tutorId String
-    tutor   User   @relation(fields: [tutorId], references: [id], onDelete: Cascade)
-
-    // Basic Info
-    title    String
-    category String
-
-    description String @db.Text
-
-    extraInfos String[]
-
-    topics String[]
-
-    requirement String? @db.Text
-
-    image String?
-
-    curriculums String[]
-
-    
-
-    // Schedule
-    startDate DateTime
-
-    time String
-
-    timeZone String
-
-    classDuration Int
-
-    language String
-
-    courseDuration Int
-
-
-    // Pricing
-    pricePerStudent Float
-
-    minStudent Int
-
-    maxStudent Int
-    
-
-    enrollmentDeadline DateTime
-    // Relations
-
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
+  @@index([tutorId])
+  @@index([category])
+  @@index([enrollmentDeadline])
 }
 
+model CurriculumProgress {
+  id              String   @id @default(uuid())
+  courseId        String
+  studentId       String
+  curriculumIndex Int
+  completedAt     DateTime @default(now())
+  course          Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  student         User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
-model Resource {
-    id String @id @default(uuid())
-
-    tutorId String
-    tutor User @relation(fields: [tutorId], references: [id], onDelete: Cascade)
-
-    name String
-    url String
+  @@unique([courseId, studentId, curriculumIndex])
+  @@index([studentId])
+  @@index([courseId])
 }
 
-model PaymentInformation {
-  id                 String   @id @default(uuid())
+model CourseCompletion {
+  id          String   @id @default(uuid())
+  courseId    String
+  studentId   String
+  completedAt DateTime @default(now())
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  student     User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
-  userId             String   @unique
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  paymentMethod      String
-
-  legalName          String
-
-  bankName           String?
-
-  bankAccountName    String?
-
-  bankAccountNumber  String?
-
-  routingNumber      String?
-
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  @@unique([courseId, studentId])
+  @@index([studentId])
+  @@index([courseId])
 }

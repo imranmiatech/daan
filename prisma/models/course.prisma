@@ -25,6 +25,8 @@ model Course {
   enrollments        CourseEnrollment[]
   courseCompletions  CourseCompletion[]
   curriculumProgress CurriculumProgress[]
+  curriculumItems    Curriculum[]
+  payments           Payment[]
 
   @@index([tutorId])
   @@index([category])

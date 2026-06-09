@@ -6,7 +6,9 @@ import { AppModule } from './app.module';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    rawBody: true,
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -29,10 +31,23 @@ async function bootstrap() {
 
   // Enable CORS for frontend (default to localhost:5173)
   const frontend = process.env.FRONTEND_URL || 'http://localhost:5173';
-  const origins = frontend.includes(',')
+  let origins: string[] | boolean = frontend.includes(',')
     ? frontend.split(',').map((s) => s.trim())
-    : frontend;
-  app.enableCors({ origin: origins, credentials: true });
+    : [frontend.trim()];
+
+  // Allow wildcard origin in development if explicitly set to '*'
+  if (origins.length === 1 && origins[0] === '*') {
+    origins = true;
+  }
+
+  app.enableCors({
+    origin: origins,
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: 'Content-Type, Accept, Authorization, X-Requested-With',
+    credentials: true,
+  });
+
+  console.log('CORS origins:', origins === true ? '*' : origins);
 
   await app.listen(process.env.PORT ?? 5000);
 

@@ -5,6 +5,7 @@ import {
   IsNumber,
   ValidateNested,
   IsEnum,
+  IsNotEmpty,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { DayOfWeek } from '@prisma/client';
@@ -75,9 +76,17 @@ export class AvailabilityDto {
   @IsOptional()
   @IsString()
   endTime?: string;
+
+  /**
+   * Availability timezone.
+   * @example "Asia/Dhaka"
+   */
+  @IsOptional()
+  @IsString()
+  timezone?: string;
 }
 
-export class UpdateProfileDto {
+export class CreateProfileDto {
   @IsOptional()
   @IsString()
   fullName?: string;
@@ -144,4 +153,10 @@ export class UpdateProfileDto {
   availability?: AvailabilityDto[];
 }
 
+export class UpdateProfileDto extends CreateProfileDto {}
 
+export class PublicCreateProfileDto extends CreateProfileDto {
+  @IsString()
+  @IsNotEmpty()
+  userId!: string;
+}

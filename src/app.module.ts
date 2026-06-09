@@ -13,6 +13,8 @@ import { SettingsModule } from './modules/settings/settings.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { ReviewModule } from './modules/review/review.module';
 import { RedisModule } from './modules/common/redis/redis.module';
+import { ContactModule } from './modules/contact/contact.module';
+
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { RedisModule } from './modules/common/redis/redis.module';
     SettingsModule,
     ChatModule,
     ReviewModule,
+    ContactModule,
+
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -56,12 +56,15 @@ export class CreateCourseDto {
   courseDuration!: number;
 
   @IsNumber()
+  @Min(0)
   pricePerStudent!: number;
 
   @IsNumber()
+  @Min(1)
   minStudent!: number;
 
   @IsNumber()
+  @Min(1)
   maxStudent!: number;
 
   @IsDateString()
@@ -87,6 +90,13 @@ export enum CoursePriceFilter {
   SIXTY_PLUS = '$60+/hr',
 }
 
+export enum UpcomingCourseDateFilter {
+  ALL = 'All Upcoming',
+  STARTING_SOON = 'Starting Soon',
+  THIS_WEEK = 'This Week',
+  THIS_MONTH = 'This Month',
+}
+
 export class UpcomingCourseQueryDto {
   @IsOptional()
   @IsEnum(CourseSubjectFilter)
@@ -95,4 +105,8 @@ export class UpcomingCourseQueryDto {
   @IsOptional()
   @IsEnum(CoursePriceFilter)
   price?: CoursePriceFilter;
+
+  @IsOptional()
+  @IsEnum(UpcomingCourseDateFilter)
+  date?: UpcomingCourseDateFilter;
 }

@@ -5,11 +5,13 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
   CoursePriceFilter,
   CourseSubjectFilter,
   CreateCourseDto,
+  UpcomingCourseDateFilter,
   UpcomingCourseQueryDto,
 } from './dto/course.dto';
 
@@ -33,6 +35,18 @@ type CourseWithTutor = Prisma.CourseGetPayload<{
     };
   };
 }>;
+
+type CourseWithEnrollmentStats = CourseWithTutor & {
+  enrolledStudentCount: number;
+  enrollmentPercentage: number;
+};
+
+type EnrollmentRow = {
+  id: string;
+  courseId: string;
+  studentId: string;
+  createdAt: Date;
+};
 
 @Injectable()
 export class CourseService {
@@ -281,13 +295,85 @@ export class CourseService {
     return completedCourses.length;
   }
 
+  async enrollCourse(courseId: string, studentId: string) {
+    const student = await this.prisma.user.findFirst({
+      where: {
+        id: studentId,
+        role: Role.STUDENT,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!student) {
+      throw new UnauthorizedException('Only students can enroll in courses');
+    }
+
+    const course = await this.prisma.course.findUnique({
+      where: {
+        id: courseId,
+      },
+      select: {
+        id: true,
+        maxStudent: true,
+        startDate: true,
+        enrollmentDeadline: true,
+      },
+    });
+
+    if (!course) {
+      throw new NotFoundException('Course not found');
+    }
+
+    const now = new Date();
+
+    if (course.startDate <= now) {
+      throw new BadRequestException('Course has already started');
+    }
+
+    if (course.enrollmentDeadline < now) {
+      throw new BadRequestException('Enrollment deadline has passed');
+    }
+
+    const enrolledStudentCount = await this.getCourseEnrollmentCount(courseId);
+
+    if (enrolledStudentCount >= course.maxStudent) {
+      throw new BadRequestException('Course enrollment is full');
+    }
+
+    const existingEnrollment = await this.getStudentCourseEnrollment(
+      courseId,
+      studentId,
+    );
+
+    if (existingEnrollment) {
+      throw new BadRequestException('Student is already enrolled');
+    }
+
+    const enrollment = await this.createCourseEnrollment(courseId, studentId);
+    const updatedEnrolledStudentCount = enrolledStudentCount + 1;
+
+    return {
+      success: true,
+      message: 'Student enrolled successfully',
+      data: {
+        ...enrollment,
+        enrolledStudentCount: updatedEnrolledStudentCount,
+        maxStudent: course.maxStudent,
+        enrollmentPercentage: this.calculateEnrollmentPercentage(
+          updatedEnrolledStudentCount,
+          course.maxStudent,
+        ),
+      },
+    };
+  }
+
   async getUpcomingCourses(query: UpcomingCourseQueryDto) {
-    const { subject, price } = query;
+    const { subject, price, date } = query;
 
     const where: Prisma.CourseWhereInput = {
-      startDate: {
-        gte: new Date(),
-      },
+      startDate: this.getUpcomingStartDateFilter(date),
     };
 
     if (subject && subject !== CourseSubjectFilter.ALL) {
@@ -332,8 +418,11 @@ export class CourseService {
       filters: {
         subject: subject ?? CourseSubjectFilter.ALL,
         price: price ?? CoursePriceFilter.ALL,
+        date: date ?? UpcomingCourseDateFilter.ALL,
       },
-      data: await this.withTutorCompletedCoursesCount(courses),
+      data: await this.withTutorCompletedCoursesCount(
+        await this.withEnrollmentStats(courses),
+      ),
     };
   }
 
@@ -356,6 +445,133 @@ export class CourseService {
         },
       },
     } satisfies Prisma.CourseInclude;
+  }
+
+  private getUpcomingStartDateFilter(
+    date?: UpcomingCourseDateFilter,
+  ): Prisma.DateTimeFilter {
+    const now = new Date();
+
+    if (date === UpcomingCourseDateFilter.STARTING_SOON) {
+      const sevenDaysFromNow = new Date(now);
+      sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
+
+      return {
+        gte: now,
+        lte: sevenDaysFromNow,
+      };
+    }
+
+    if (date === UpcomingCourseDateFilter.THIS_WEEK) {
+      const endOfWeek = new Date(now);
+      const daysUntilSunday = (7 - endOfWeek.getDay()) % 7;
+      endOfWeek.setDate(endOfWeek.getDate() + daysUntilSunday);
+      endOfWeek.setHours(23, 59, 59, 999);
+
+      return {
+        gte: now,
+        lte: endOfWeek,
+      };
+    }
+
+    if (date === UpcomingCourseDateFilter.THIS_MONTH) {
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      endOfMonth.setHours(23, 59, 59, 999);
+
+      return {
+        gte: now,
+        lte: endOfMonth,
+      };
+    }
+
+    return {
+      gte: now,
+    };
+  }
+
+  private async withEnrollmentStats(
+    courses: CourseWithTutor[],
+  ): Promise<CourseWithEnrollmentStats[]> {
+    const courseIds = courses.map((course) => course.id);
+
+    if (courseIds.length === 0) {
+      return [];
+    }
+
+    const enrollmentCounts = await this.prisma.$queryRaw<
+      { courseId: string; count: number }[]
+    >`
+      SELECT "courseId", COUNT(*)::integer AS "count"
+      FROM "CourseEnrollment"
+      WHERE "courseId" IN (${Prisma.join(courseIds)})
+      GROUP BY "courseId"
+    `;
+
+    const enrollmentCountByCourse = enrollmentCounts.reduce<
+      Record<string, number>
+    >((counts, enrollmentCount) => {
+      counts[enrollmentCount.courseId] = enrollmentCount.count;
+      return counts;
+    }, {});
+
+    return courses.map((course) => {
+      const enrolledStudentCount = enrollmentCountByCourse[course.id] ?? 0;
+
+      return {
+        ...course,
+        enrolledStudentCount,
+        enrollmentPercentage: this.calculateEnrollmentPercentage(
+          enrolledStudentCount,
+          course.maxStudent,
+        ),
+      };
+    });
+  }
+
+  private async getCourseEnrollmentCount(courseId: string) {
+    const [enrollmentCount] = await this.prisma.$queryRaw<{ count: number }[]>`
+      SELECT COUNT(*)::integer AS "count"
+      FROM "CourseEnrollment"
+      WHERE "courseId" = ${courseId}
+    `;
+
+    return enrollmentCount?.count ?? 0;
+  }
+
+  private async getStudentCourseEnrollment(
+    courseId: string,
+    studentId: string,
+  ) {
+    const [enrollment] = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT "id"
+      FROM "CourseEnrollment"
+      WHERE "courseId" = ${courseId}
+        AND "studentId" = ${studentId}
+      LIMIT 1
+    `;
+
+    return enrollment ?? null;
+  }
+
+  private async createCourseEnrollment(courseId: string, studentId: string) {
+    const [enrollment] = await this.prisma.$queryRaw<EnrollmentRow[]>`
+      INSERT INTO "CourseEnrollment" ("id", "courseId", "studentId")
+      VALUES (${randomUUID()}, ${courseId}, ${studentId})
+      RETURNING "id", "courseId", "studentId", "createdAt"
+    `;
+
+    return enrollment;
+  }
+
+  private calculateEnrollmentPercentage(
+    enrolledStudentCount: number,
+    maxStudent: number,
+  ) {
+    if (maxStudent <= 0) {
+      return 0;
+    }
+
+    return Math.round((enrolledStudentCount / maxStudent) * 100);
   }
 
   private async withTutorCompletedCoursesCount(courses: CourseWithTutor[]) {

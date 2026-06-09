@@ -22,12 +22,26 @@ model Course {
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
   tutor              User                 @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  enrollments        CourseEnrollment[]
   courseCompletions  CourseCompletion[]
   curriculumProgress CurriculumProgress[]
 
   @@index([tutorId])
   @@index([category])
   @@index([enrollmentDeadline])
+}
+
+model CourseEnrollment {
+  id        String   @id @default(uuid())
+  courseId  String
+  studentId String
+  createdAt DateTime @default(now())
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  student   User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, studentId])
+  @@index([studentId])
+  @@index([courseId])
 }
 
 model CurriculumProgress {
@@ -54,5 +68,16 @@ model CourseCompletion {
 
   @@unique([courseId, studentId])
   @@index([studentId])
+  @@index([courseId])
+}
+
+model Curriculum {
+  id          String   @id @default(uuid())
+  courseId    String
+  title       String
+  date       DateTime
+  time       String
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
   @@index([courseId])
 }

@@ -19,6 +19,7 @@ import {
 import { Role } from '@prisma/client';
 import { CurrentUser, Roles } from '../auth/decorators/roles.decorator';
 import { AuthGuard } from '../auth/guards/auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { CourseService } from './course.service';
 import { CreateCourseDto, UpcomingCourseQueryDto } from './dto/course.dto';
 
@@ -44,7 +45,7 @@ export class CourseController {
 
   @Get('upcoming')
   @ApiOperation({
-    summary: 'Get upcoming courses with subject and price filters',
+    summary: 'Get upcoming courses with subject, price, and date filters',
   })
   @ApiResponse({
     status: 200,
@@ -52,6 +53,22 @@ export class CourseController {
   })
   getUpcomingCourses(@Query() query: UpcomingCourseQueryDto) {
     return this.courseService.getUpcomingCourses(query);
+  }
+
+  @Post(':id/enroll')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.STUDENT)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Enroll the current student in a course' })
+  @ApiResponse({ status: 201, description: 'Student enrolled successfully.' })
+  @ApiResponse({ status: 400, description: 'Enrollment is not available.' })
+  @ApiResponse({ status: 401, description: 'Unauthorized.' })
+  @ApiResponse({ status: 404, description: 'Course not found.' })
+  enrollCourse(
+    @Param('id') id: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.courseService.enrollCourse(id, user.userId);
   }
 
   @Get('all')

@@ -1,28 +1,153 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { ApplicationStatus } from '@prisma/client';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { ApplicationStatus, DayOfWeek } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { UpdateProfileDto } from './dto/profile.dto';
+import {
+  AvailabilityDto,
+  CreateProfileDto,
+  UpdateProfileDto,
+} from './dto/profile.dto';
 
 @Injectable()
 export class ProfileService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async createProfile(userId: string, dto: CreateProfileDto) {
+    const {
+      fullName,
+      country,
+      city,
+      avatarUrl,
+      bio,
+      yearOfExperience,
+      pricePerHour,
+      languageExpertise,
+      aboutMe,
+      teachingCategory,
+      teachingSkills,
+      sessionDuration,
+      videoUrl,
+      education,
+      availability,
+    } = dto;
+
+    const availabilityData = this.mapAvailability(availability);
+
+    const profile = await this.prisma.$transaction(async (tx) => {
+      const existingProfile = await tx.userProfile.findUnique({
+        where: { userId },
+      });
+
+      if (fullName !== undefined) {
+        await tx.user.update({
+          where: { id: userId },
+          data: { fullName },
+        });
+      }
+
+      if (existingProfile) {
+        await tx.education.deleteMany({
+          where: { profileId: existingProfile.id },
+        });
+        await tx.availability.deleteMany({
+          where: { profileId: existingProfile.id },
+        });
+
+        if (education && education.length > 0) {
+          await tx.education.createMany({
+            data: education.map((e) => ({
+              profileId: existingProfile.id,
+              institution: e.institution,
+              country: e.country,
+              city: e.city,
+              degree: e.degree,
+              passingYear: e.passingYear,
+            })),
+          });
+        }
+
+        if (availabilityData.length > 0) {
+          await tx.availability.createMany({
+            data: availabilityData.map((a) => ({
+              profileId: existingProfile.id,
+              ...a,
+            })),
+          });
+        }
+
+        return tx.userProfile.update({
+          where: { userId },
+          data: {
+            country,
+            city,
+            avatarUrl,
+            bio,
+            yearOfExperience,
+            pricePerHour,
+            languageExpertise,
+            aboutMe,
+            teachingCategory,
+            teachingSkills,
+            sessionDuration,
+            videoUrl,
+          },
+          include: this.profileInclude(),
+        });
+      }
+
+      return tx.userProfile.create({
+        data: {
+          userId,
+          country,
+          city,
+          avatarUrl,
+          bio,
+          yearOfExperience,
+          pricePerHour,
+          languageExpertise,
+          aboutMe,
+          teachingCategory,
+          teachingSkills,
+          sessionDuration,
+          videoUrl,
+          education:
+            education && education.length > 0
+              ? {
+                  create: education.map((e) => ({
+                    institution: e.institution,
+                    country: e.country,
+                    city: e.city,
+                    degree: e.degree,
+                    passingYear: e.passingYear,
+                  })),
+                }
+              : undefined,
+          availability:
+            availabilityData.length > 0
+              ? {
+                  create: availabilityData,
+                }
+              : undefined,
+        },
+        include: this.profileInclude(),
+      });
+    });
+
+    return {
+      success: true,
+      message: 'Profile created successfully',
+      data: profile,
+    };
+  }
+
   async getProfile(userId: string) {
     const [profile, completedCourses] = await this.prisma.$transaction([
       this.prisma.userProfile.findUnique({
         where: { userId },
-        include: {
-          education: true,
-          availability: true,
-          user: {
-            select: {
-              id: true,
-              email: true,
-              fullName: true,
-              role: true,
-            },
-          },
-        },
+        include: this.profileInclude(),
       }),
       this.prisma.courseCompletion.findMany({
         where: {
@@ -100,16 +225,16 @@ export class ProfileService {
     }
 
     if (availability !== undefined) {
+      const availabilityData = this.mapAvailability(availability);
+
       await this.prisma.availability.deleteMany({
         where: { profileId: profile.id },
       });
-      if (availability && availability.length > 0) {
+      if (availabilityData.length > 0) {
         await this.prisma.availability.createMany({
-          data: availability.map((a) => ({
+          data: availabilityData.map((a) => ({
             profileId: profile.id,
-            dayOfWeek: a.dayOfWeek!,
-            startTime: a.startTime!,
-            endTime: a.endTime!,
+            ...a,
           })),
         });
       }
@@ -131,18 +256,7 @@ export class ProfileService {
         sessionDuration,
         videoUrl,
       },
-      include: {
-        education: true,
-        availability: true,
-        user: {
-          select: {
-            id: true,
-            email: true,
-            fullName: true,
-            role: true,
-          },
-        },
-      },
+      include: this.profileInclude(),
     });
   }
 
@@ -167,44 +281,80 @@ export class ProfileService {
     });
   }
   async getTutorAvailability(tutorId: string, courseId?: string) {
-  // Support passing either a userId (users.id) or a profile id
-  let profile = await this.prisma.userProfile.findUnique({
-    where: { userId: tutorId },
-  });
-
-  if (!profile) {
-    profile = await this.prisma.userProfile.findUnique({
-      where: { id: tutorId },
-    });
-  }
-
-  if (!profile) {
-    throw new NotFoundException('Tutor profile not found');
-  }
-
-  const availabilities = await this.prisma.availability.findMany({
-    where: {
-      profileId: profile.id,
-    },
-    orderBy: {
-      dayOfWeek: 'asc',
-    },
-  });
-
-  if (courseId) {
-    const course = await this.prisma.course.findUnique({
-      where: { id: courseId },
-      select: { timeZone: true },
+    // Support passing either a userId (users.id) or a profile id
+    let profile = await this.prisma.userProfile.findUnique({
+      where: { userId: tutorId },
     });
 
-    if (course && course.timeZone) {
-      return availabilities.map((a) => ({
-        ...a,
-        timezone: (a as any).timezone ?? course.timeZone,
-      }));
+    if (!profile) {
+      profile = await this.prisma.userProfile.findUnique({
+        where: { id: tutorId },
+      });
     }
+
+    if (!profile) {
+      throw new NotFoundException('Tutor profile not found');
+    }
+
+    const availabilities = await this.prisma.availability.findMany({
+      where: {
+        profileId: profile.id,
+      },
+      orderBy: {
+        dayOfWeek: 'asc',
+      },
+    });
+
+    if (courseId) {
+      const course = await this.prisma.course.findUnique({
+        where: { id: courseId },
+        select: { timeZone: true },
+      });
+
+      if (course && course.timeZone) {
+        return availabilities.map((a) => ({
+          ...a,
+          timezone: (a as any).timezone ?? course.timeZone,
+        }));
+      }
+    }
+
+    return availabilities;
   }
 
-  return availabilities;
-}
+  private mapAvailability(availability?: AvailabilityDto[]) {
+    if (!availability) {
+      return [];
+    }
+
+    return availability.map((a) => {
+      if (!a.dayOfWeek || !a.startTime || !a.endTime) {
+        throw new BadRequestException(
+          'Availability requires dayOfWeek, startTime, and endTime',
+        );
+      }
+
+      return {
+        dayOfWeek: a.dayOfWeek as DayOfWeek,
+        startTime: a.startTime,
+        endTime: a.endTime,
+        timezone: a.timezone,
+      };
+    });
+  }
+
+  private profileInclude() {
+    return {
+      education: true,
+      availability: true,
+      user: {
+        select: {
+          id: true,
+          email: true,
+          fullName: true,
+          role: true,
+        },
+      },
+    } as const;
+  }
 }

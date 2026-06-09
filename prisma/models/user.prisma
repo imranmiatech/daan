@@ -12,11 +12,19 @@ model User {
   otpExpires         DateTime?
   conversations      ConversationParticipant[]
   courses            Course[]
+  courseEnrollments  CourseEnrollment[]
   courseCompletions  CourseCompletion[]
   curriculumProgress CurriculumProgress[]
   sentMessages       Message[]
   paymentInfo        PaymentInformation?
   resources          Resource[]
   givenReviews       Review[]                  @relation("StudentReviews")
+  notifications      Notification[]
   profile            UserProfile?
+
+  notifyCourseUpdates    Boolean @default(true)
+  notifyNewContent       Boolean @default(true)
+  notifyLessonReminders  Boolean @default(true)
+  notifyNewMessages      Boolean @default(true)
+  notifyWeeklyDigest     Boolean @default(false)
 }

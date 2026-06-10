@@ -257,6 +257,20 @@ export class AuthService {
     return { message: 'Password reset successful' };
   }
 
+  async logout(userId: string) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        refreshTokenHash: null,
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Logout successful',
+    };
+  }
+
   async deleteMyAccount(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },

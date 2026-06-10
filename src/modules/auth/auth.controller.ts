@@ -116,6 +116,26 @@ export class AuthController {
     };
   }
 
+  @Post('logout')
+  @UseGuards(AuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Logout logged-in user' })
+  @ApiResponse({
+    status: 200,
+    description: 'Logout successful.',
+  })
+  async logout(
+    @Req() req: any,
+    @Res({ passthrough: true }) res: express.Response,
+  ) {
+    const result = await this.authService.logout(req.user.userId);
+
+    res.clearCookie('accessToken');
+    res.clearCookie('refreshToken');
+
+    return result;
+  }
+
   @Delete('me')
   @UseGuards(AuthGuard)
   @ApiBearerAuth()

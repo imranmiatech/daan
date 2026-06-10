@@ -49,10 +49,10 @@ async function bootstrap() {
 
   console.log('CORS origins:', origins === true ? '*' : origins);
 
-  await app.listen(process.env.PORT ?? 5000);
+  await app.listen(process.env.PORT ?? 3000);
 
   console.log(
-    `Swagger running at: http://localhost:${process.env.PORT ?? 5000}/docs`,
+    `Swagger running at: http://localhost:${process.env.PORT ?? 3000}/docs`,
   );
 }
 

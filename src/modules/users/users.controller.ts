@@ -1,25 +1,35 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser, Roles } from '../auth/decorators/roles.decorator';
 import { UsersService } from './users.service';
-import { UpdateStatusDto, UpdateStatusResponseDto } from './dto/update-status.dto';
+import {
+  UpdateStatusDto,
+  UpdateStatusResponseDto,
+} from './dto/update-status.dto';
 import { TutorQueryDto } from './dto/tutor-query.dto';
+import { TutorStudentsQueryDto } from './dto/tutor-students-query.dto';
 
 @ApiTags('Users')
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) { }
+  constructor(private readonly usersService: UsersService) {}
 
   @Get()
   @ApiOperation({
@@ -41,11 +51,57 @@ export class UsersController {
     status: 200,
     description: 'Paginated tutor list retrieved successfully.',
   })
-  getAllTutors(
-    @Query() query: TutorQueryDto,
-  ) {
+  getAllTutors(@Query() query: TutorQueryDto) {
     return this.usersService.findAllTutors(query.page);
   }
+
+  @Get('tutor/students')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.TUTOR)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      'Get students enrolled in the current tutor courses or private hire',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Paginated tutor student roster retrieved successfully.',
+  })
+  findTutorStudents(
+    @CurrentUser() user: { userId: string },
+    @Query() query: TutorStudentsQueryDto,
+  ) {
+    return this.usersService.findTutorStudents(user.userId, query);
+  }
+
+  @Get('tutor/students/:studentId')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.TUTOR)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get one student from the current tutor roster',
+  })
+  findTutorStudentById(
+    @CurrentUser() user: { userId: string },
+    @Param('studentId') studentId: string,
+  ) {
+    return this.usersService.findTutorStudentById(user.userId, studentId);
+  }
+
+  @Delete('tutor/students/:studentId')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.TUTOR)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Remove a student from the current tutor group courses',
+  })
+  deleteTutorStudent(
+    @CurrentUser() user: { userId: string },
+    @Param('studentId') studentId: string,
+  ) {
+    return this.usersService.deleteTutorStudent(user.userId, studentId);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.usersService.findOne(id);
@@ -67,7 +123,9 @@ export class UsersController {
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Approve or Reject a tutor application profile (Admin Only)' })
+  @ApiOperation({
+    summary: 'Approve or Reject a tutor application profile (Admin Only)',
+  })
   @ApiResponse({
     status: 200,
     description: 'Profile status updated successfully.',
@@ -89,6 +147,9 @@ export class UsersController {
     @Param('profileId') profileId: string,
     @Body() updateStatusDto: UpdateStatusDto,
   ) {
-    return this.usersService.updateProfileStatus(profileId, updateStatusDto.status);
+    return this.usersService.updateProfileStatus(
+      profileId,
+      updateStatusDto.status,
+    );
   }
 }

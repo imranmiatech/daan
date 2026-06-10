@@ -5,21 +5,39 @@ enum PaymentStatus {
   CANCELLED
 }
 
+enum PaymentType {
+  GROUP
+  PRIVATE
+}
+
+enum PayoutStatus {
+  PENDING
+  PAID
+}
+
 model Payment {
   id                    String        @id @default(uuid())
   userId                String
-  courseId              String
+  tutorId               String
+  courseId              String?
   amount                Float
   currency              String        @default("usd")
   status                PaymentStatus @default(PENDING)
+  type                  PaymentType
+  payoutStatus          PayoutStatus  @default(PENDING)
   stripeSessionId       String?       @unique
   stripePaymentIntentId String?
   createdAt             DateTime      @default(now())
   updatedAt             DateTime      @updatedAt
 
-  user                  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  course                Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user                  User          @relation("StudentPayments", fields: [userId], references: [id], onDelete: Cascade)
+  tutor                 User          @relation("TutorPayments", fields: [tutorId], references: [id], onDelete: Cascade)
+  course                Course?       @relation(fields: [courseId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([tutorId])
   @@index([courseId])
+  @@index([type])
+  @@index([status])
+  @@index([payoutStatus])
 }

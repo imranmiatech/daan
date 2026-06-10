@@ -27,6 +27,7 @@ model Course {
   curriculumProgress CurriculumProgress[]
   curriculumItems    Curriculum[]
   payments           Payment[]
+  resources          Resource[]
 
   @@index([tutorId])
   @@index([category])

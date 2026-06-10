@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 
@@ -254,6 +255,32 @@ export class AuthService {
     await this.redis.del(this.getPasswordResetCooldownKey(normalizedEmail));
 
     return { message: 'Password reset successful' };
+  }
+
+  async deleteMyAccount(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    await this.prisma.user.delete({
+      where: { id: user.id },
+    });
+
+    await this.redis.del(this.getPasswordResetOtpKey(user.email));
+    await this.redis.del(this.getPasswordResetCooldownKey(user.email));
+
+    return {
+      success: true,
+      message: 'Account deleted successfully',
+    };
   }
 
   private normalizeEmail(email: string): string {

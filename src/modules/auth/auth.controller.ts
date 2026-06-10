@@ -1,43 +1,53 @@
-
 import {
   Body,
   Controller,
+  Delete,
   Post,
+  Req,
   Res,
-} from "@nestjs/common";
-import { ApiTags, ApiOperation, ApiResponse } from "@nestjs/swagger";
-import * as express from "express";
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
+import * as express from 'express';
 
-import { AuthService } from "./auth.service";
-import { ForgotPasswordDto, ForgotPasswordResponseDto, LoginDto, LoginResponseDto, RegisterDto, RegisterResponseDto, ResetPasswordDto, ResetPasswordResponseDto } from "./dto/auth.dto";
+import { AuthService } from './auth.service';
+import {
+  ForgotPasswordDto,
+  ForgotPasswordResponseDto,
+  LoginDto,
+  LoginResponseDto,
+  RegisterDto,
+  RegisterResponseDto,
+  ResetPasswordDto,
+  ResetPasswordResponseDto,
+} from './dto/auth.dto';
+import { AuthGuard } from './guards/auth.guard';
 
-
-@ApiTags("Authentication")
-@Controller("auth")
+@ApiTags('Authentication')
+@Controller('auth')
 export class AuthController {
-  constructor(
-    private readonly authService: AuthService,
-  ) {}
+  constructor(private readonly authService: AuthService) {}
 
-  @Post("register")
-  @ApiOperation({ summary: "Register a new user and create their profile" })
+  @Post('register')
+  @ApiOperation({ summary: 'Register a new user and create their profile' })
   @ApiResponse({
     status: 201,
-    description: "User registered successfully.",
+    description: 'User registered successfully.',
     type: RegisterResponseDto,
   })
-  register(
-    @Body() registerDto: RegisterDto,
-  ) {
-    return this.authService.register(
-      registerDto,
-    );
+  register(@Body() registerDto: RegisterDto) {
+    return this.authService.register(registerDto);
   }
   @Post('login')
-  @ApiOperation({ summary: "Login user and set httpOnly session cookies" })
+  @ApiOperation({ summary: 'Login user and set httpOnly session cookies' })
   @ApiResponse({
     status: 200,
-    description: "User successfully logged in.",
+    description: 'User successfully logged in.',
     type: LoginResponseDto,
   })
   async login(
@@ -45,62 +55,42 @@ export class AuthController {
     @Res({ passthrough: true })
     res: express.Response,
   ) {
-  const result =
-    await this.authService.login(
-      loginDto,
-    );
+    const result = await this.authService.login(loginDto);
 
-  res.cookie(
-    'accessToken',
-    result.accessToken,
-    {
+    res.cookie('accessToken', result.accessToken, {
       httpOnly: true,
-      secure:
-        process.env.NODE_ENV ===
-        'development',
+      secure: process.env.NODE_ENV === 'development',
       sameSite: 'lax',
       maxAge: 15 * 60 * 1000,
-    },
-  );
+    });
 
-  res.cookie(
-    'refreshToken',
-    result.refreshToken,
-    {
+    res.cookie('refreshToken', result.refreshToken, {
       httpOnly: true,
-      secure:
-        process.env.NODE_ENV ===
-        'production',
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge:
-        7 *
-        24 *
-        60 *
-        60 *
-        1000,
-    },
-  );
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
 
-  return {
-    success: true,
-    message: 'Login successful',
-    accessToken: result.accessToken,
-    refreshToken: result.refreshToken,
-    user: result.user,
-  };
-}
+    return {
+      success: true,
+      message: 'Login successful',
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      user: result.user,
+    };
+  }
 
   @Post('forgot-password')
-  @ApiOperation({ summary: "Request password reset OTP (Sends email)" })
+  @ApiOperation({ summary: 'Request password reset OTP (Sends email)' })
   @ApiResponse({
     status: 200,
-    description: "OTP generated and sent.",
+    description: 'OTP generated and sent.',
     type: ForgotPasswordResponseDto,
   })
-  async forgotPassword(
-    @Body() forgotPasswordDto: ForgotPasswordDto,
-  ) {
-    const result = await this.authService.forgotPassword(forgotPasswordDto.email);
+  async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    const result = await this.authService.forgotPassword(
+      forgotPasswordDto.email,
+    );
     return {
       success: true,
       message: result.message,
@@ -108,15 +98,13 @@ export class AuthController {
   }
 
   @Post('reset-password')
-  @ApiOperation({ summary: "Reset password using 6-digit OTP code" })
+  @ApiOperation({ summary: 'Reset password using 6-digit OTP code' })
   @ApiResponse({
     status: 200,
-    description: "Password reset successful.",
+    description: 'Password reset successful.',
     type: ResetPasswordResponseDto,
   })
-  async resetPassword(
-    @Body() resetPasswordDto: ResetPasswordDto,
-  ) {
+  async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
     const result = await this.authService.resetPassword(
       resetPasswordDto.email,
       resetPasswordDto.otp,
@@ -126,5 +114,25 @@ export class AuthController {
       success: true,
       message: result.message,
     };
+  }
+
+  @Delete('me')
+  @UseGuards(AuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Delete logged-in user account' })
+  @ApiResponse({
+    status: 200,
+    description: 'Account deleted successfully.',
+  })
+  async deleteMyAccount(
+    @Req() req: any,
+    @Res({ passthrough: true }) res: express.Response,
+  ) {
+    const result = await this.authService.deleteMyAccount(req.user.userId);
+
+    res.clearCookie('accessToken');
+    res.clearCookie('refreshToken');
+
+    return result;
   }
 }

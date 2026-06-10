@@ -1,7 +1,16 @@
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 export class CreateCheckoutSessionDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  courseId!: string;
+  courseId?: string;
+
+  @IsOptional()
+  @IsString()
+  tutorId?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  sessionCount?: number;
 }

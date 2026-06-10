@@ -25,6 +25,290 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## Database Schema
+
+The application database is defined with Prisma under `prisma/schema.prisma` and `prisma/models/*.prisma`.
+GitHub renders the Mermaid diagram below directly in the README.
+
+```mermaid
+erDiagram
+  USER ||--o| USER_PROFILE : profile
+  USER ||--o| PAYMENT_INFORMATION : payment_information
+  USER ||--o{ COURSE : teaches
+  USER ||--o{ COURSE_ENROLLMENT : enrollments
+  USER ||--o{ COURSE_COMPLETION : completions
+  USER ||--o{ CURRICULUM_PROGRESS : progress
+  USER ||--o{ RESOURCE : uploads
+  USER ||--o{ NOTIFICATION : notifications
+  USER ||--o{ REVIEW : writes
+  USER ||--o{ MESSAGE : sends
+  USER ||--o{ CONVERSATION_PARTICIPANT : participates
+  USER ||--o{ PAYMENT : student_payments
+  USER ||--o{ PAYMENT : tutor_payments
+
+  COURSE ||--o{ COURSE_ENROLLMENT : enrollments
+  COURSE ||--o{ COURSE_COMPLETION : completions
+  COURSE ||--o{ CURRICULUM_PROGRESS : progress
+  COURSE ||--o{ CURRICULUM : lessons
+  COURSE ||--o{ RESOURCE : resources
+  COURSE ||--o{ PAYMENT : course_payments
+
+  CONVERSATION ||--o{ CONVERSATION_PARTICIPANT : participants
+  CONVERSATION ||--o{ MESSAGE : messages
+
+  USER_PROFILE ||--o{ EDUCATION : education
+  USER_PROFILE ||--o{ AVAILABILITY : availability
+  USER_PROFILE ||--o{ REVIEW : received_reviews
+
+  USER {
+    string id PK
+    string fullName
+    string email
+    string password
+    datetime createdAt
+    boolean isEmailVerified
+    Role role
+    datetime updatedAt
+    string refreshTokenHash
+    string otpCode
+    datetime otpExpires
+    boolean notifyCourseUpdates
+    boolean notifyNewContent
+    boolean notifyLessonReminders
+    boolean notifyNewMessages
+    boolean notifyWeeklyDigest
+  }
+
+  USER_PROFILE {
+    string id PK
+    string userId FK
+    string country
+    string city
+    string avatarUrl
+    string bio
+    int yearOfExperience
+    float pricePerHour
+    string languageExpertise
+    string aboutMe
+    string teachingCategory
+    string[] teachingSkills
+    int sessionDuration
+    string videoUrl
+    ApplicationStatus applicationStatus
+    datetime createdAt
+    datetime updatedAt
+    float averageRating
+    int totalReviews
+  }
+
+  EDUCATION {
+    string id PK
+    string profileId FK
+    string institution
+    string country
+    string city
+    string degree
+    int passingYear
+    datetime createdAt
+    datetime updatedAt
+  }
+
+  AVAILABILITY {
+    string id PK
+    string profileId FK
+    DayOfWeek dayOfWeek
+    string startTime
+    string endTime
+    string timezone
+    datetime createdAt
+    datetime updatedAt
+  }
+
+  PAYMENT_INFORMATION {
+    string id PK
+    string userId FK
+    string paymentMethod
+    string legalName
+    string bankName
+    string bankAccountName
+    string bankAccountNumber
+    string routingNumber
+    datetime createdAt
+    datetime updatedAt
+  }
+
+  COURSE {
+    string id PK
+    string tutorId FK
+    string title
+    string category
+    string description
+    string[] extraInfos
+    string[] topics
+    string requirement
+    string image
+    string[] curriculums
+    datetime startDate
+    string time
+    string timeZone
+    int classDuration
+    string language
+    int courseDuration
+    float pricePerStudent
+    int minStudent
+    int maxStudent
+    datetime enrollmentDeadline
+    datetime createdAt
+    datetime updatedAt
+  }
+
+  COURSE_ENROLLMENT {
+    string id PK
+    string courseId FK
+    string studentId FK
+    datetime createdAt
+  }
+
+  CURRICULUM_PROGRESS {
+    string id PK
+    string courseId FK
+    string studentId FK
+    int curriculumIndex
+    datetime completedAt
+  }
+
+  COURSE_COMPLETION {
+    string id PK
+    string courseId FK
+    string studentId FK
+    datetime completedAt
+  }
+
+  CURRICULUM {
+    string id PK
+    string courseId FK
+    string title
+    datetime date
+    string time
+  }
+
+  RESOURCE {
+    string id PK
+    string tutorId FK
+    string courseId FK
+    string name
+    string url
+    string size
+    int downloads
+    datetime createdAt
+    datetime updatedAt
+  }
+
+  REVIEW {
+    string id PK
+    int rating
+    string comment
+    string reviewerId FK
+    string tutorProfileId FK
+    datetime createdAt
+    datetime updatedAt
+  }
+
+  PAYMENT {
+    string id PK
+    string userId FK
+    string tutorId FK
+    string courseId FK
+    float amount
+    string currency
+    PaymentStatus status
+    PaymentType type
+    PayoutStatus payoutStatus
+    string stripeSessionId
+    string stripePaymentIntentId
+    datetime createdAt
+    datetime updatedAt
+  }
+
+  NOTIFICATION {
+    string id PK
+    string userId FK
+    string type
+    string title
+    string body
+    json data
+    string targetUrl
+    boolean isRead
+    datetime createdAt
+    datetime deliveredAt
+  }
+
+  CONVERSATION {
+    string id PK
+    datetime createdAt
+    datetime updatedAt
+  }
+
+  CONVERSATION_PARTICIPANT {
+    string id PK
+    string conversationId FK
+    string userId FK
+    datetime joinedAt
+    datetime lastReadAt
+  }
+
+  MESSAGE {
+    string id PK
+    string conversationId FK
+    string senderId FK
+    string content
+    MessageType messageType
+    string fileUrl
+    boolean isEdited
+    boolean isDeleted
+    datetime createdAt
+    datetime updatedAt
+  }
+
+  CONTACT {
+    string id PK
+    string name
+    string email
+    string phone
+    string message
+    datetime createdAt
+  }
+```
+
+### Enums
+
+- `Role`: `STUDENT`, `TUTOR`, `ADMIN`
+- `ApplicationStatus`: `DRAFT`, `PENDING`, `APPROVED`, `REJECTED`
+- `DayOfWeek`: `MONDAY`, `TUESDAY`, `WEDNESDAY`, `THURSDAY`, `FRIDAY`, `SATURDAY`, `SUNDAY`
+- `PaymentStatus`: `PENDING`, `PAID`, `FAILED`, `CANCELLED`
+- `PaymentType`: `GROUP`, `PRIVATE`
+- `PayoutStatus`: `PENDING`, `PAID`
+- `MessageType`: `TEXT`, `IMAGE`, `FILE`
+
+## Backend Features
+
+- JWT-based authentication for register, login, forgot password, reset password, and account deletion
+- Role-based access control for `STUDENT`, `TUTOR`, and `ADMIN`
+- Tutor profile management with availability, education, skills, pricing, and application status
+- Admin review and approval flow for tutor applications
+- Course creation, update, deletion, listing, and upcoming course discovery
+- Student course enrollment and curriculum completion tracking
+- Tutor class management for enrolled students, lesson overview, and course resources
+- Stripe-powered checkout sessions for group courses and private tutoring
+- Payment tracking for student and tutor transactions, dashboard summaries, and webhook processing
+- Tutor dashboard analytics for revenue, students, lessons, notifications, and recent activity
+- Real-time chat with conversations, messages, read status, and WebSocket support
+- Review and rating system for tutors
+- Resource upload and management for tutors and courses
+- Settings management for tutor payment information and password changes
+- Contact form submission and contact inquiry listing
+- User and tutor administration endpoints for listing, filtering, and account management
+
 ## Project setup
 
 ```bash

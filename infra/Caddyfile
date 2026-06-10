@@ -1,0 +1,81 @@
+# Global configuration options
+{
+    # Enable HTTP/3 (QUIC) support
+    servers {
+        protocol {
+            experimental_http3
+        }
+    }
+    
+    # Configure logging
+    log {
+        output file /var/log/caddy/global.log {
+            roll_size 10mb
+            roll_keep 5
+        }
+        format json
+    }
+}
+
+# Main Application domain reverse proxy configuration
+{$DOMAIN_NAME} {
+    # Compress responses
+    encode gzip zstd
+
+    # Add security headers
+    header {
+        # Prevent Clickjacking
+        X-Frame-Options "DENY"
+        # Prevent MIME-sniffing
+        X-Content-Type-Options "nosniff"
+        # Protect against XSS
+        X-XSS-Protection "1; mode=block"
+        # Strict Transport Security (HSTS)
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        # Referrer Policy
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # Content Security Policy (Adjust according to frontend/API requirements)
+        Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline'"
+        # Feature Policy / Permissions Policy
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        # Disable server banner for security obfuscation
+        -Server
+    }
+
+    # API Backend Reverse Proxy (NestJS)
+    reverse_proxy {$BACKEND_SERVICE} {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        
+        # Buffer requests to optimize data transfer
+        # buffer_requests
+        
+        # Health check configuration for backend
+        health_uri /health
+        health_interval 10s
+        health_timeout 5s
+        
+        # Connection settings
+        transport http {
+            dial_timeout 5s
+            keepalive_interval 30s
+        }
+    }
+
+    # Service logs
+    log {
+        output file /var/log/caddy/daanclerk_access.log {
+            roll_size 10mb
+            roll_keep 10
+        }
+        format json
+    }
+}
+
+# Future Microservices Template (Uncomment and customize for new microservices)
+# api.{$DOMAIN_NAME} {
+#     encode gzip zstd
+#     reverse_proxy microservice-name:4000
+# }

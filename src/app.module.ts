@@ -17,6 +17,7 @@ import { ContactModule } from './modules/contact/contact.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { ClassesModule } from './modules/classes/classes.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { AdminDashboardModule } from './modules/admindashboard/admindashboard.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     PaymentModule,
     ClassesModule,
     DashboardModule,
+    AdminDashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService],

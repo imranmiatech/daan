@@ -10,6 +10,7 @@ import {
   TutorStudentCourseTypeFilter,
   TutorStudentsQueryDto,
 } from './dto/tutor-students-query.dto';
+import { TutorQueryDto } from './dto/tutor-query.dto';
 
 @Injectable()
 export class UsersService {
@@ -23,41 +24,15 @@ export class UsersService {
     });
   }
 
-  async findAllTutors(page = 1) {
-    const limit = 6;
-    const currentPage = Math.max(1, page);
-    const skip = (currentPage - 1) * limit;
-
-    const [profiles, total, completedCourses] = await this.prisma.$transaction([
+  async findAllTutors(query: TutorQueryDto = {}) {
+    const [profiles, completedCourses] = await this.prisma.$transaction([
       this.prisma.userProfile.findMany({
-        where: {
-          applicationStatus: ApplicationStatus.APPROVED,
-          user: {
-            role: 'TUTOR',
-          },
-        },
+        where: this.buildTutorWhere(query),
         include: {
           user: true,
         },
-        orderBy: [
-          {
-            averageRating: {
-              sort: 'desc',
-              nulls: 'last',
-            },
-          },
-          { totalReviews: 'desc' },
-          { createdAt: 'desc' },
-        ],
-        skip,
-        take: limit,
-      }),
-      this.prisma.userProfile.count({
-        where: {
-          applicationStatus: ApplicationStatus.APPROVED,
-          user: {
-            role: 'TUTOR',
-          },
+        orderBy: {
+          createdAt: 'desc',
         },
       }),
       this.prisma.courseCompletion.findMany({
@@ -82,21 +57,14 @@ export class UsersService {
       }),
     ]);
 
-    const completedCourseCountByTutor = completedCourses.reduce<
-      Record<string, number>
-    >((counts, completion) => {
-      const tutorId = completion.course.tutorId;
-      counts[tutorId] = (counts[tutorId] ?? 0) + 1;
-      return counts;
-    }, {});
+    const completedCourseCountByTutor =
+      this.getCompletedCourseCountByTutor(completedCourses);
 
     return {
       success: true,
-      meta: {
-        page: currentPage,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
+      filters: {
+        subject: query.subject || 'All Subjects',
+        price: query.price || 'All Prices',
       },
       data: profiles.map(({ user, ...profile }) => ({
         ...user,
@@ -106,6 +74,142 @@ export class UsersService {
         },
       })),
     };
+  }
+
+  async findBestRatedTutors() {
+    const [profiles, completedCourses] = await this.prisma.$transaction([
+      this.prisma.userProfile.findMany({
+        where: this.buildTutorWhere(),
+        include: {
+          user: true,
+        },
+        orderBy: [
+          {
+            averageRating: {
+              sort: 'desc',
+              nulls: 'last',
+            },
+          },
+          { totalReviews: 'desc' },
+          { createdAt: 'desc' },
+        ],
+      }),
+      this.prisma.courseCompletion.findMany({
+        where: {
+          course: {
+            tutor: {
+              profile: {
+                applicationStatus: ApplicationStatus.APPROVED,
+              },
+              role: 'TUTOR',
+            },
+          },
+        },
+        distinct: ['courseId'],
+        select: {
+          course: {
+            select: {
+              tutorId: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const completedCourseCountByTutor =
+      this.getCompletedCourseCountByTutor(completedCourses);
+
+    return {
+      success: true,
+      data: profiles.map(({ user, ...profile }) => ({
+        ...user,
+        profile: {
+          ...profile,
+          completedCoursesCount: completedCourseCountByTutor[user.id] ?? 0,
+        },
+      })),
+    };
+  }
+
+  private buildTutorWhere(
+    query: TutorQueryDto = {},
+  ): Prisma.UserProfileWhereInput {
+    const subject = query.subject?.trim();
+    const priceFilter = this.getTutorPriceFilter(query.price);
+
+    return {
+      applicationStatus: ApplicationStatus.APPROVED,
+      user: {
+        role: 'TUTOR',
+      },
+      ...(subject &&
+        !this.isAllFilter(subject) && {
+          teachingCategory: {
+            equals: subject,
+            mode: 'insensitive',
+          },
+        }),
+      ...(priceFilter && {
+        pricePerHour: priceFilter,
+      }),
+    };
+  }
+
+  private getTutorPriceFilter(
+    price?: string,
+  ): Prisma.FloatNullableFilter | undefined {
+    if (!price || this.isAllFilter(price)) {
+      return undefined;
+    }
+
+    const normalized = price.toLowerCase().replace(/\s/g, '');
+
+    if (
+      ['$0-$40/hr', '$0-40/hr', '0-40', '0_40', '0to40'].includes(normalized)
+    ) {
+      return {
+        gte: 0,
+        lte: 40,
+      };
+    }
+
+    if (
+      ['$40-$60/hr', '$40-60/hr', '40-60', '40_60', '40to60'].includes(
+        normalized,
+      )
+    ) {
+      return {
+        gte: 40,
+        lte: 60,
+      };
+    }
+
+    if (['$60+/hr', '60+', '60plus', '60_plus'].includes(normalized)) {
+      return {
+        gte: 60,
+      };
+    }
+
+    return undefined;
+  }
+
+  private isAllFilter(value: string) {
+    const normalized = value.toLowerCase().replace(/\s/g, '');
+
+    return ['all', 'allsubjects', 'allprices'].includes(normalized);
+  }
+
+  private getCompletedCourseCountByTutor(
+    completedCourses: { course: { tutorId: string } }[],
+  ) {
+    return completedCourses.reduce<Record<string, number>>(
+      (counts, completion) => {
+        const tutorId = completion.course.tutorId;
+        counts[tutorId] = (counts[tutorId] ?? 0) + 1;
+        return counts;
+      },
+      {},
+    );
   }
 
   async findOne(id: string) {

@@ -45,14 +45,26 @@ export class UsersController {
 
   @Get('tutors')
   @ApiOperation({
-    summary: 'Get tutors sorted by highest rating with pagination',
+    summary: 'Get approved tutors with subject and price filters',
   })
   @ApiResponse({
     status: 200,
-    description: 'Paginated tutor list retrieved successfully.',
+    description: 'Tutor list retrieved successfully.',
   })
   getAllTutors(@Query() query: TutorQueryDto) {
-    return this.usersService.findAllTutors(query.page);
+    return this.usersService.findAllTutors(query);
+  }
+
+  @Get('tutors/best-rated')
+  @ApiOperation({
+    summary: 'Get all approved tutors sorted by best rating first',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Best rated tutor list retrieved successfully.',
+  })
+  getBestRatedTutors() {
+    return this.usersService.findBestRatedTutors();
   }
 
   @Get('tutor/students')

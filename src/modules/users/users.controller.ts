@@ -25,6 +25,7 @@ import {
 } from './dto/update-status.dto';
 import { TutorQueryDto } from './dto/tutor-query.dto';
 import { TutorStudentsQueryDto } from './dto/tutor-students-query.dto';
+import { UpdateRoleDto } from './dto/update-role.dto';
 
 @ApiTags('Users')
 @Controller('users')
@@ -117,6 +118,33 @@ export class UsersController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.usersService.findOne(id);
+  }
+
+  @Patch(':id/role')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Update user role (Admin Only)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'User role updated successfully.',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token.',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Requires ADMIN role.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Not Found - User not found.',
+  })
+  updateUserRole(@Param('id') id: string, @Body() dto: UpdateRoleDto) {
+    return this.usersService.updateUserRole(id, dto.role);
   }
 
   @ApiResponse({

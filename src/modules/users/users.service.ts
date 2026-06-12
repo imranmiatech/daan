@@ -5,6 +5,7 @@ import {
   PaymentStatus,
   PaymentType,
   Prisma,
+  Role,
 } from '@prisma/client';
 import {
   TutorStudentCourseTypeFilter,
@@ -632,6 +633,38 @@ export class UsersService {
       success: true,
       message: `Application status updated to ${status} successfully`,
       data: updatedProfile,
+    };
+  }
+
+  async updateUserRole(userId: string, role: Role) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException(`User with ID ${userId} not found`);
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: { role },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        role: true,
+        isEmailVerified: true,
+        createdAt: true,
+        updatedAt: true,
+        profile: true,
+      },
+    });
+
+    return {
+      success: true,
+      message: `User role updated to ${role} successfully`,
+      data: updatedUser,
     };
   }
 

@@ -18,6 +18,7 @@ import { PaymentModule } from './modules/payment/payment.module';
 import { ClassesModule } from './modules/classes/classes.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { AdminDashboardModule } from './modules/admindashboard/admindashboard.module';
+import { CalendarModule } from './modules/calendar/calendar.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { AdminDashboardModule } from './modules/admindashboard/admindashboard.mo
     ClassesModule,
     DashboardModule,
     AdminDashboardModule,
+    CalendarModule,
   ],
   controllers: [AppController],
   providers: [AppService],

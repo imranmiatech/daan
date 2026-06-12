@@ -106,13 +106,25 @@ export class CourseService {
     };
   }
 
-  async getAllCourse() {
+  async getAllCourse(query: UpcomingCourseQueryDto = {}) {
     const courses = await this.prisma.course.findMany({
+      where: this.buildCourseFilter(query),
       include: this.getCourseTutorInclude(),
+      orderBy: {
+        createdAt: 'desc',
+      },
     });
+
     return {
       success: true,
-      data: await this.withTutorCompletedCoursesCount(courses),
+      filters: {
+        subject: query.subject ?? CourseSubjectFilter.ALL,
+        price: query.price ?? CoursePriceFilter.ALL,
+        date: query.date ?? UpcomingCourseDateFilter.ALL,
+      },
+      data: await this.withTutorCompletedCoursesCount(
+        await this.withEnrollmentStats(courses),
+      ),
     };
   }
 
@@ -370,43 +382,8 @@ export class CourseService {
   }
 
   async getUpcomingCourses(query: UpcomingCourseQueryDto) {
-    const { subject, price, date } = query;
-
-    const where: Prisma.CourseWhereInput = {
-      startDate: this.getUpcomingStartDateFilter(date),
-    };
-
-    if (subject && subject !== CourseSubjectFilter.ALL) {
-      where.category = {
-        equals: subject,
-        mode: 'insensitive',
-      };
-    }
-
-    if (price && price !== CoursePriceFilter.ALL) {
-      if (price === CoursePriceFilter.ZERO_TO_FORTY) {
-        where.pricePerStudent = {
-          gte: 0,
-          lte: 40,
-        };
-      }
-
-      if (price === CoursePriceFilter.FORTY_TO_SIXTY) {
-        where.pricePerStudent = {
-          gte: 40,
-          lte: 60,
-        };
-      }
-
-      if (price === CoursePriceFilter.SIXTY_PLUS) {
-        where.pricePerStudent = {
-          gte: 60,
-        };
-      }
-    }
-
     const courses = await this.prisma.course.findMany({
-      where,
+      where: this.buildCourseFilter(query, true),
       include: this.getCourseTutorInclude(),
       orderBy: {
         startDate: 'asc',
@@ -416,13 +393,58 @@ export class CourseService {
     return {
       success: true,
       filters: {
-        subject: subject ?? CourseSubjectFilter.ALL,
-        price: price ?? CoursePriceFilter.ALL,
-        date: date ?? UpcomingCourseDateFilter.ALL,
+        subject: query.subject ?? CourseSubjectFilter.ALL,
+        price: query.price ?? CoursePriceFilter.ALL,
+        date: query.date ?? UpcomingCourseDateFilter.ALL,
       },
       data: await this.withTutorCompletedCoursesCount(
         await this.withEnrollmentStats(courses),
       ),
+    };
+  }
+
+  private buildCourseFilter(
+    query: UpcomingCourseQueryDto = {},
+    upcomingOnly = false,
+  ): Prisma.CourseWhereInput {
+    const { subject, price, date } = query;
+    const where: Prisma.CourseWhereInput = {};
+
+    if (upcomingOnly || (date && date !== UpcomingCourseDateFilter.ALL)) {
+      where.startDate = this.getUpcomingStartDateFilter(date);
+    }
+
+    if (subject && subject !== CourseSubjectFilter.ALL) {
+      where.category = {
+        equals: subject,
+        mode: 'insensitive',
+      };
+    }
+
+    if (price && price !== CoursePriceFilter.ALL) {
+      where.pricePerStudent = this.getCoursePriceFilter(price);
+    }
+
+    return where;
+  }
+
+  private getCoursePriceFilter(price: CoursePriceFilter): Prisma.FloatFilter {
+    if (price === CoursePriceFilter.ZERO_TO_FORTY) {
+      return {
+        gte: 0,
+        lte: 40,
+      };
+    }
+
+    if (price === CoursePriceFilter.FORTY_TO_SIXTY) {
+      return {
+        gte: 40,
+        lte: 60,
+      };
+    }
+
+    return {
+      gte: 60,
     };
   }
 

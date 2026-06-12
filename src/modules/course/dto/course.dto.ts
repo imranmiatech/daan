@@ -76,11 +76,11 @@ export enum CourseSubjectFilter {
   PROGRAMMING = 'Programming',
   LANGUAGES = 'Languages',
   MATHEMATICS = 'Mathematics',
-  MUSIC = 'MUSIC',
-  SCIENCE = 'SCIENCE',
-  BUSINESS = 'BUSINESS',
-  DESIGN = 'DESIGN',
-  WRITING = 'WRITTING',
+  MUSIC = 'Music',
+  SCIENCE = 'Science',
+  BUSINESS = 'Business',
+  DESIGN = 'Design',
+  WRITING = 'Writing',
 }
 
 export enum CoursePriceFilter {

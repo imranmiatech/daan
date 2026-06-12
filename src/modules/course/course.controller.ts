@@ -72,10 +72,10 @@ export class CourseController {
   }
 
   @Get('all')
-  @ApiOperation({ summary: 'Get all courses' })
+  @ApiOperation({ summary: 'Get all courses with optional filters' })
   @ApiResponse({ status: 200, description: 'Courses retrieved successfully.' })
-  getAllCourse() {
-    return this.courseService.getAllCourse();
+  getAllCourse(@Query() query: UpcomingCourseQueryDto) {
+    return this.courseService.getAllCourse(query);
   }
 
   @Get(':id')

@@ -15,6 +15,7 @@ model User {
   courseEnrollments     CourseEnrollment[]
   courseCompletions     CourseCompletion[]
   curriculumProgress    CurriculumProgress[]
+  lessonStates          StudentLessonState[]
   sentMessages          Message[]
   paymentInfo           PaymentInformation?
   resources             Resource[]

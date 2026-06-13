@@ -20,6 +20,8 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { AdminDashboardModule } from './modules/admindashboard/admindashboard.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
 import { NotificationModule } from './modules/notification/notification.module';
+import { AgoraModule } from './modules/agora/agora.module';
+import { StudentLessonsModule } from './modules/student-lessons/student-lessons.module';
 
 @Module({
   imports: [
@@ -42,6 +44,8 @@ import { NotificationModule } from './modules/notification/notification.module';
     AdminDashboardModule,
     CalendarModule,
     NotificationModule,
+    AgoraModule,
+    StudentLessonsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

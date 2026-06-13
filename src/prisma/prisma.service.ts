@@ -6,6 +6,7 @@ import {
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
+import { setDefaultAutoSelectFamily } from 'net';
 import * as bcrypt from 'bcrypt';
 
 
@@ -15,6 +16,7 @@ export class PrismaService
   implements OnModuleInit, OnModuleDestroy
 {
   constructor() {
+    setDefaultAutoSelectFamily(false);
     const pool = new Pool({ connectionString: process.env.DATABASE_URL });
     const adapter = new PrismaPg(pool);
     super({ adapter });

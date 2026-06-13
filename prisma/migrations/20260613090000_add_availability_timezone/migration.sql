@@ -1,0 +1,1 @@
+ALTER TABLE "Availability" ADD COLUMN IF NOT EXISTS "timezone" TEXT;

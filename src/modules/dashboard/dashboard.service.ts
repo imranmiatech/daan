@@ -12,9 +12,116 @@ type DashboardLesson = {
   status: 'completed' | 'live' | 'upcoming';
 };
 
+type StudentCourse = {
+  id: string;
+  title: string;
+  image: string | null;
+  curriculums: string[];
+  startDate: Date;
+  time: string;
+  classDuration: number;
+  tutor: {
+    id: string;
+    fullName: string;
+    email: string;
+    profile: {
+      avatarUrl: string | null;
+    } | null;
+  };
+  courseCompletions: { id: string }[];
+  curriculumProgress: { curriculumIndex: number }[];
+};
+
+type StudentLesson = DashboardLesson & {
+  courseImage: string | null;
+  tutor: {
+    id: string;
+    name: string;
+    email: string;
+    image: string | null;
+  };
+  durationMinutes: number;
+  curriculumIndex: number;
+  isCompletedByStudent: boolean;
+};
+
+type StudentDashboardContext = {
+  student: {
+    id: string;
+    fullName: string;
+    profile: {
+      avatarUrl: string | null;
+    } | null;
+  };
+  enrollments: {
+    id: string;
+    createdAt: Date;
+    course: StudentCourse;
+  }[];
+  courses: StudentCourse[];
+  lessons: StudentLesson[];
+};
+
 @Injectable()
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async getStudentHome(studentId: string) {
+    const [overview, nextLesson, todaySchedule, learningProgress, recentActivity] =
+      await Promise.all([
+        this.getStudentOverviewData(studentId),
+        this.getStudentNextLessonData(studentId),
+        this.getStudentTodayScheduleData(studentId),
+        this.getStudentLearningProgressData(studentId),
+        this.getStudentRecentActivityData(studentId),
+      ]);
+
+    return {
+      success: true,
+      data: {
+        ...overview,
+        todaySchedule,
+        nextLesson,
+        learningProgress,
+        recentActivity,
+      },
+    };
+  }
+
+  async getStudentOverview(studentId: string) {
+    return {
+      success: true,
+      data: await this.getStudentOverviewData(studentId),
+    };
+  }
+
+  async getStudentNextLesson(studentId: string) {
+    return {
+      success: true,
+      data: await this.getStudentNextLessonData(studentId),
+    };
+  }
+
+  async getStudentTodaySchedule(studentId: string) {
+    return {
+      success: true,
+      data: await this.getStudentTodayScheduleData(studentId),
+    };
+  }
+
+  async getStudentLearningProgress(studentId: string) {
+    return {
+      success: true,
+      data: await this.getStudentLearningProgressData(studentId),
+    };
+  }
+
+  async getStudentRecentActivity(studentId: string) {
+    return {
+      success: true,
+      data: await this.getStudentRecentActivityData(studentId),
+    };
+  }
 
   async getTutorHome(tutorId: string) {
     const now = new Date();
@@ -483,6 +590,344 @@ export class DashboardService {
     ]).size;
   }
 
+  private async getStudentOverviewData(studentId: string) {
+    const now = new Date();
+    const weekStart = this.startOfWeek(now);
+    const nextWeekStart = this.addDays(weekStart, 7);
+    const { student, courses, lessons } =
+      await this.getStudentDashboardContext(studentId, now);
+    const learnedMinutes = lessons
+      .filter((lesson) => lesson.isCompletedByStudent)
+      .reduce((total, lesson) => total + lesson.durationMinutes, 0);
+    const thisWeekLearnedMinutes = lessons
+      .filter(
+        (lesson) =>
+          lesson.isCompletedByStudent &&
+          lesson.date >= weekStart &&
+          lesson.date < nextWeekStart,
+      )
+      .reduce((total, lesson) => total + lesson.durationMinutes, 0);
+
+    return {
+      welcome: {
+        name: student.fullName,
+        message: 'Ready to continue your learning journey?',
+      },
+      cards: {
+        totalLessons: lessons.length,
+        activeCourses: courses.filter(
+          (course) => course.courseCompletions.length === 0,
+        ).length,
+        learnedHours: Math.round(learnedMinutes / 60),
+      },
+      meta: {
+        studentId: student.id,
+        image: student.profile?.avatarUrl ?? null,
+        completedLessons: lessons.filter(
+          (lesson) => lesson.isCompletedByStudent,
+        ).length,
+        learnedMinutes,
+        thisWeekLearnedHours: Math.round(thisWeekLearnedMinutes / 60),
+      },
+    };
+  }
+
+  private async getStudentNextLessonData(studentId: string) {
+    const { lessons } = await this.getStudentDashboardContext(studentId);
+    const nextLesson = lessons
+      .filter(
+        (lesson) =>
+          !lesson.isCompletedByStudent &&
+          (lesson.status === 'live' || lesson.status === 'upcoming'),
+      )
+      .sort((a, b) => a.date.getTime() - b.date.getTime())[0];
+
+    return nextLesson ? this.mapStudentNextLesson(nextLesson) : null;
+  }
+
+  private async getStudentTodayScheduleData(studentId: string) {
+    const now = new Date();
+    const todayStart = this.startOfDay(now);
+    const tomorrowStart = this.addDays(todayStart, 1);
+    const { lessons } = await this.getStudentDashboardContext(studentId, now);
+
+    return lessons
+      .filter((lesson) => lesson.date >= todayStart && lesson.date < tomorrowStart)
+      .sort((a, b) => a.date.getTime() - b.date.getTime())
+      .map((lesson) => this.mapStudentScheduleLesson(lesson));
+  }
+
+  private async getStudentLearningProgressData(studentId: string) {
+    const { courses } = await this.getStudentDashboardContext(studentId);
+
+    return courses.map((course) => this.mapStudentCourseProgress(course));
+  }
+
+  private async getStudentRecentActivityData(studentId: string) {
+    const { enrollments, lessons } =
+      await this.getStudentDashboardContext(studentId);
+    const [privatePayments, recentReviews] = await Promise.all([
+      this.prisma.payment.findMany({
+        where: {
+          userId: studentId,
+          type: PaymentType.PRIVATE,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 8,
+        include: {
+          tutor: {
+            select: {
+              id: true,
+              fullName: true,
+              profile: {
+                select: {
+                  avatarUrl: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.review.findMany({
+        where: { reviewerId: studentId },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        include: {
+          tutorProfile: {
+            select: {
+              user: {
+                select: {
+                  fullName: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    return this.buildStudentRecentActivity(
+      enrollments,
+      lessons,
+      privatePayments,
+      recentReviews,
+    );
+  }
+
+  private async getStudentDashboardContext(
+    studentId: string,
+    now = new Date(),
+  ): Promise<StudentDashboardContext> {
+    const student = await this.prisma.user.findUnique({
+      where: { id: studentId },
+      select: {
+        id: true,
+        fullName: true,
+        profile: {
+          select: {
+            avatarUrl: true,
+          },
+        },
+      },
+    });
+
+    if (!student) {
+      throw new NotFoundException('Student not found');
+    }
+
+    const enrollments = await this.prisma.courseEnrollment.findMany({
+      where: { studentId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        course: {
+          select: {
+            id: true,
+            title: true,
+            image: true,
+            curriculums: true,
+            startDate: true,
+            time: true,
+            classDuration: true,
+            tutor: {
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+                profile: {
+                  select: {
+                    avatarUrl: true,
+                  },
+                },
+              },
+            },
+            courseCompletions: {
+              where: { studentId },
+              select: { id: true },
+            },
+            curriculumProgress: {
+              where: { studentId },
+              select: { curriculumIndex: true },
+            },
+          },
+        },
+      },
+    });
+    const courses = enrollments.map((enrollment) => enrollment.course);
+    const lessons = courses.flatMap((course) =>
+      this.buildStudentCourseLessons(course, now),
+    );
+
+    return {
+      student,
+      enrollments,
+      courses,
+      lessons,
+    };
+  }
+
+  private buildStudentCourseLessons(
+    course: StudentCourse,
+    now: Date,
+  ): StudentLesson[] {
+    const completedIndexes = new Set(
+      course.curriculumProgress.map((item) => item.curriculumIndex),
+    );
+
+    return this.buildCourseLessons(course, now).map((lesson, index) => ({
+      ...lesson,
+      courseImage: course.image,
+      tutor: {
+        id: course.tutor.id,
+        name: course.tutor.fullName,
+        email: course.tutor.email,
+        image: course.tutor.profile?.avatarUrl ?? null,
+      },
+      durationMinutes: course.classDuration,
+      curriculumIndex: index,
+      isCompletedByStudent: completedIndexes.has(index),
+    }));
+  }
+
+  private mapStudentNextLesson(lesson: StudentLesson) {
+    return {
+      id: lesson.id,
+      courseId: lesson.courseId,
+      courseTitle: lesson.courseTitle,
+      title: lesson.title,
+      image: lesson.courseImage,
+      tutor: lesson.tutor,
+      date: lesson.date,
+      time: lesson.time,
+      duration: {
+        minutes: lesson.durationMinutes,
+        label: this.formatDuration(lesson.durationMinutes),
+      },
+      status: lesson.status,
+      canJoin: lesson.status === 'live',
+    };
+  }
+
+  private mapStudentScheduleLesson(lesson: StudentLesson) {
+    return {
+      id: lesson.id,
+      courseId: lesson.courseId,
+      title: lesson.title,
+      courseTitle: lesson.courseTitle,
+      tutorName: lesson.tutor.name,
+      time: lesson.date.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+      }),
+      status: lesson.isCompletedByStudent ? 'completed' : lesson.status,
+    };
+  }
+
+  private mapStudentCourseProgress(course: StudentCourse) {
+    const totalLessons = course.curriculums.length;
+    const completedLessons = course.curriculumProgress.length;
+    const percentage =
+      totalLessons === 0
+        ? 0
+        : Math.min(100, Math.round((completedLessons / totalLessons) * 100));
+
+    return {
+      courseId: course.id,
+      courseTitle: course.title,
+      completedLessons,
+      totalLessons,
+      percentage,
+      isCompleted: course.courseCompletions.length > 0,
+    };
+  }
+
+  private buildStudentRecentActivity(
+    enrollments: {
+      id: string;
+      createdAt: Date;
+      course: { id: string; title: string };
+    }[],
+    lessons: StudentLesson[],
+    privatePayments: {
+      id: string;
+      createdAt: Date;
+      type: PaymentType;
+      status: PaymentStatus;
+      tutor: { fullName: string };
+    }[],
+    reviews: {
+      id: string;
+      rating: number;
+      createdAt: Date;
+      tutorProfile: { user: { fullName: string } };
+    }[],
+  ) {
+    const completedLessons = lessons
+      .filter((lesson) => lesson.isCompletedByStudent)
+      .map((lesson) => ({
+        id: lesson.id,
+        type: 'COMPLETED_LESSON',
+        title: 'Completed lesson',
+        description: lesson.courseTitle,
+        createdAt: lesson.date,
+        targetUrl: `/courses/${lesson.courseId}`,
+      }));
+    const activity = [
+      ...completedLessons,
+      ...privatePayments.map((payment) => ({
+        id: payment.id,
+        type: 'BOOKED_LESSON',
+        title: 'Booked lesson',
+        description: `Private lesson with ${payment.tutor.fullName}`,
+        createdAt: payment.createdAt,
+        targetUrl: null,
+      })),
+      ...reviews.map((review) => ({
+        id: review.id,
+        type: 'REVIEW',
+        title: 'Left a review',
+        description: `${review.tutorProfile.user.fullName} - ${review.rating} stars`,
+        createdAt: review.createdAt,
+        targetUrl: null,
+      })),
+      ...enrollments.map((enrollment) => ({
+        id: enrollment.id,
+        type: 'JOINED_GROUP_CLASS',
+        title: 'Joined group class',
+        description: enrollment.course.title,
+        createdAt: enrollment.createdAt,
+        targetUrl: `/courses/${enrollment.course.id}`,
+      })),
+    ];
+
+    return activity
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, 5)
+      .map((item) => ({
+        ...item,
+        timeAgo: this.formatTimeAgo(item.createdAt),
+      }));
+  }
+
   private async getTutorProfile(tutorId: string) {
     const tutor = await this.prisma.user.findUnique({
       where: { id: tutorId },
@@ -796,5 +1241,20 @@ export class DashboardService {
     }
 
     return 'just now';
+  }
+
+  private formatDuration(minutes: number) {
+    if (minutes < 60) {
+      return `${minutes} min`;
+    }
+
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+
+    if (remainingMinutes === 0) {
+      return hours === 1 ? '1 hr' : `${hours} hrs`;
+    }
+
+    return `${hours} hr ${remainingMinutes} min`;
   }
 }

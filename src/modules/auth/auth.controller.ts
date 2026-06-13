@@ -13,7 +13,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import * as express from 'express';
+import type { Response } from 'express';
 
 import { AuthService } from './auth.service';
 import {
@@ -53,7 +53,7 @@ export class AuthController {
   async login(
     @Body() loginDto: LoginDto,
     @Res({ passthrough: true })
-    res: express.Response,
+    res: Response,
   ) {
     const result = await this.authService.login(loginDto);
 
@@ -126,7 +126,7 @@ export class AuthController {
   })
   async logout(
     @Req() req: any,
-    @Res({ passthrough: true }) res: express.Response,
+    @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.authService.logout(req.user.userId);
 
@@ -146,7 +146,7 @@ export class AuthController {
   })
   async deleteMyAccount(
     @Req() req: any,
-    @Res({ passthrough: true }) res: express.Response,
+    @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.authService.deleteMyAccount(req.user.userId);
 

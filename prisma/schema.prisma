@@ -13,6 +13,7 @@ enum Role {
 }
 
 enum ApplicationStatus {
+  DRAFT
   PENDING
   APPROVED
   REJECTED

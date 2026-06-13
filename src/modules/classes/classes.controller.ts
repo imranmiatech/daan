@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseIntPipe,
   Post,
   Query,
   UseGuards,
@@ -72,7 +73,9 @@ export class ClassesController {
   }
 
   @Delete(':courseId/enrolled-students/:studentId')
-  @ApiOperation({ summary: 'Remove a student from a tutor class by student ID' })
+  @ApiOperation({
+    summary: 'Remove a student from a tutor class by student ID',
+  })
   deleteEnrolledStudent(
     @CurrentUser() user: { userId: string },
     @Param('courseId') courseId: string,
@@ -92,6 +95,36 @@ export class ClassesController {
     @Param('courseId') courseId: string,
   ) {
     return this.classesService.getLessons(user.userId, courseId);
+  }
+
+  @Get(':courseId/lessons/:curriculumIndex/join-preview')
+  @ApiOperation({ summary: 'Get tutor live-class join preview' })
+  getLessonJoinPreview(
+    @CurrentUser() user: { userId: string },
+    @Param('courseId') courseId: string,
+    @Param('curriculumIndex', ParseIntPipe) curriculumIndex: number,
+  ) {
+    return this.classesService.getLessonJoinPreview(
+      user.userId,
+      courseId,
+      curriculumIndex,
+    );
+  }
+
+  @Post(':courseId/lessons/:curriculumIndex/join')
+  @ApiOperation({
+    summary: 'Join/start a tutor live class and receive Agora credentials',
+  })
+  joinLesson(
+    @CurrentUser() user: { userId: string },
+    @Param('courseId') courseId: string,
+    @Param('curriculumIndex', ParseIntPipe) curriculumIndex: number,
+  ) {
+    return this.classesService.joinLesson(
+      user.userId,
+      courseId,
+      curriculumIndex,
+    );
   }
 
   @Get(':courseId/resources')

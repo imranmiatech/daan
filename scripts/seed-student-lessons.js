@@ -25,13 +25,15 @@ function addDays(date, days) {
 
 async function main() {
   const now = new Date();
-  const hashedPassword = await bcrypt.hash('password123', 10);
+  const studentPasswordHash = await bcrypt.hash('student123', 10);
+  const tutorPasswordHash = await bcrypt.hash('password123', 10);
 
   await prisma.user.upsert({
     where: { id: STUDENT_ID },
     update: {
       fullName: 'Istiak Turjo',
       email: 'student@gmail.com',
+      password: studentPasswordHash,
       role: Role.STUDENT,
       isEmailVerified: true,
     },
@@ -39,7 +41,7 @@ async function main() {
       id: STUDENT_ID,
       fullName: 'Istiak Turjo',
       email: 'student@gmail.com',
-      password: hashedPassword,
+      password: studentPasswordHash,
       role: Role.STUDENT,
       isEmailVerified: true,
       profile: {
@@ -57,6 +59,7 @@ async function main() {
     update: {
       fullName: 'David Chen',
       email: 'david.chen@daan.test',
+      password: tutorPasswordHash,
       role: Role.TUTOR,
       isEmailVerified: true,
     },
@@ -64,7 +67,7 @@ async function main() {
       id: TUTOR_ID,
       fullName: 'David Chen',
       email: 'david.chen@daan.test',
-      password: hashedPassword,
+      password: tutorPasswordHash,
       role: Role.TUTOR,
       isEmailVerified: true,
     },

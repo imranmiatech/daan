@@ -71,6 +71,11 @@ type StudentLesson = {
   } | null;
 };
 
+type LessonStateOverride = {
+  status: string;
+  reason: string | null;
+};
+
 @Injectable()
 export class StudentLessonsService {
   constructor(
@@ -295,19 +300,25 @@ export class StudentLessonsService {
     const reviewByTutorProfile = new Map(
       reviews.map((review) => [review.tutorProfileId, review]),
     );
-    const lessonStates = await this.prisma.studentLessonState.findMany({
-      where: { studentId },
-      select: {
-        courseId: true,
-        curriculumIndex: true,
-        status: true,
-        reason: true,
-      },
-    });
-    const stateByLesson = new Map(
+    const lessonStates = await this.prisma.$queryRaw<
+      {
+        courseId: string;
+        curriculumIndex: number;
+        status: string;
+        reason: string | null;
+      }[]
+    >`
+      SELECT "courseId", "curriculumIndex", "status", "reason"
+      FROM "StudentLessonState"
+      WHERE "studentId" = ${studentId}
+    `;
+    const stateByLesson = new Map<string, LessonStateOverride>(
       lessonStates.map((state) => [
         this.getLessonKey(state.courseId, state.curriculumIndex),
-        state,
+        {
+          status: state.status,
+          reason: state.reason,
+        },
       ]),
     );
 
@@ -324,10 +335,7 @@ export class StudentLessonsService {
       string,
       { id: string; rating: number; comment: string | null }
     >,
-    stateByLesson: Map<
-      string,
-      { status: string; reason: string | null }
-    >,
+    stateByLesson: Map<string, LessonStateOverride>,
   ): StudentLesson[] {
     const { course } = enrollment;
     const lessonTitles = course.curriculums.length

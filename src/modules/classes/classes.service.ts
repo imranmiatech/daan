@@ -1,10 +1,12 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { PaymentStatus, PaymentType, Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { AgoraService } from '../agora/agora.service';
 import {
   ClassStudentsQueryDto,
   CreateClassResourceDto,
@@ -12,7 +14,10 @@ import {
 
 @Injectable()
 export class ClassesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly agoraService: AgoraService,
+  ) {}
 
   async getMeta(tutorId: string, courseId: string) {
     await this.assertTutorCourse(tutorId, courseId);
@@ -268,7 +273,9 @@ export class ClassesService {
     });
 
     if (!enrollment) {
-      throw new NotFoundException('Student enrollment not found for this class');
+      throw new NotFoundException(
+        'Student enrollment not found for this class',
+      );
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -335,6 +342,94 @@ export class ClassesService {
             : null,
         joinAvailable: lesson.status === 'live',
       })),
+    };
+  }
+
+  async getLessonJoinPreview(
+    tutorId: string,
+    courseId: string,
+    curriculumIndex: number,
+  ) {
+    await this.assertTutorCourse(tutorId, courseId);
+    const lesson = await this.getCourseLesson(courseId, curriculumIndex);
+
+    if (lesson.status === 'completed') {
+      throw new BadRequestException('This lesson is already completed');
+    }
+
+    const enrolledStudents = await this.prisma.courseEnrollment.count({
+      where: { courseId },
+    });
+
+    return {
+      success: true,
+      data: {
+        lesson: {
+          id: lesson.id,
+          courseId,
+          curriculumIndex,
+          title: lesson.title,
+          date: lesson.date,
+          time: lesson.time,
+          durationMinutes: lesson.durationMinutes,
+          status: lesson.status,
+          enrolledStudents,
+        },
+        deviceChecks: [
+          {
+            type: 'camera',
+            label: 'Camera is ready',
+            required: true,
+          },
+          {
+            type: 'microphone',
+            label: 'Microphone is ready',
+            required: true,
+          },
+        ],
+        agora: {
+          ...this.agoraService.getClientConfig(),
+          channelName: this.agoraService.buildChannelName(
+            courseId,
+            curriculumIndex,
+          ),
+        },
+      },
+    };
+  }
+
+  async joinLesson(tutorId: string, courseId: string, curriculumIndex: number) {
+    await this.assertTutorCourse(tutorId, courseId);
+    const lesson = await this.getCourseLesson(courseId, curriculumIndex);
+
+    if (lesson.status === 'completed') {
+      throw new BadRequestException('This lesson is already completed');
+    }
+
+    const channelName = this.agoraService.buildChannelName(
+      courseId,
+      curriculumIndex,
+    );
+
+    return {
+      success: true,
+      data: {
+        lesson: {
+          id: lesson.id,
+          courseId,
+          curriculumIndex,
+          title: lesson.title,
+          date: lesson.date,
+          time: lesson.time,
+          durationMinutes: lesson.durationMinutes,
+          status: lesson.status,
+        },
+        agora: this.agoraService.buildRtcToken({
+          channelName,
+          account: tutorId,
+          role: 'publisher',
+        }),
+      },
     };
   }
 
@@ -477,9 +572,21 @@ export class ClassesService {
         title,
         date,
         time: course.time,
+        durationMinutes: course.classDuration,
         status: this.getLessonStatus(lessonDate, course.classDuration),
       };
     });
+  }
+
+  private async getCourseLesson(courseId: string, curriculumIndex: number) {
+    const lessons = await this.getCourseLessons(courseId);
+    const lesson = lessons[curriculumIndex];
+
+    if (!lesson) {
+      throw new NotFoundException('Lesson not found for this class');
+    }
+
+    return lesson;
   }
 
   private getNextLesson(

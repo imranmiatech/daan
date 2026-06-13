@@ -29,6 +29,13 @@ type StudentDashboardTransactionQuery = {
   type?: string;
 };
 
+type TutorPrivateLessonsQuery = {
+  page?: number;
+  limit?: number;
+  status?: string;
+  search?: string;
+};
+
 @Injectable()
 export class PaymentService {
   private readonly stripe: Stripe.Stripe;
@@ -957,6 +964,137 @@ export class PaymentService {
     };
   }
 
+  async findTutorPrivateLessons(
+    tutorId: string,
+    query: TutorPrivateLessonsQuery,
+  ) {
+    const page = Math.max(1, query.page || 1);
+    const limit = Math.min(Math.max(1, query.limit || 10), 100);
+    const skip = (page - 1) * limit;
+    const search = query.search?.trim();
+    const requestedStatus = this.parsePrivateLessonStatus(query.status);
+
+    const where: Prisma.PaymentWhereInput = {
+      tutorId,
+      type: PaymentType.PRIVATE,
+      ...(search && {
+        OR: [
+          {
+            user: {
+              fullName: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+          },
+          {
+            user: {
+              email: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+          },
+        ],
+      }),
+    };
+
+    if (requestedStatus === 'upcoming') {
+      where.status = PaymentStatus.PENDING;
+    }
+
+    if (requestedStatus === 'cancelled') {
+      where.status = { in: [PaymentStatus.CANCELLED, PaymentStatus.FAILED] };
+    }
+
+    if (requestedStatus === 'live' || requestedStatus === 'completed') {
+      where.status = PaymentStatus.PAID;
+    }
+
+    const querySkip =
+      requestedStatus === 'live' || requestedStatus === 'completed' ? 0 : skip;
+    const queryTake =
+      requestedStatus === 'live' || requestedStatus === 'completed'
+        ? undefined
+        : limit;
+
+    const [totalBeforeDerivedFilter, payments, tutor] = await Promise.all([
+      this.prisma.payment.count({ where }),
+      this.prisma.payment.findMany({
+        where,
+        skip: querySkip,
+        ...(queryTake && { take: queryTake }),
+        orderBy: { createdAt: 'desc' },
+        include: {
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              profile: {
+                select: {
+                  avatarUrl: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: tutorId },
+        select: {
+          profile: {
+            select: {
+              pricePerHour: true,
+              sessionDuration: true,
+              teachingCategory: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const pricePerHour = tutor?.profile?.pricePerHour ?? null;
+    const defaultDurationMinutes = tutor?.profile?.sessionDuration ?? 60;
+    const rows = payments
+      .map((payment) =>
+        this.mapPrivateLesson(payment, pricePerHour, defaultDurationMinutes),
+      )
+      .filter((lesson) =>
+        requestedStatus ? lesson.status === requestedStatus : true,
+      );
+    const pageRows =
+      requestedStatus === 'live' || requestedStatus === 'completed'
+        ? rows.slice(skip, skip + limit)
+        : rows;
+    const total =
+      requestedStatus === 'live' || requestedStatus === 'completed'
+        ? rows.length
+        : totalBeforeDerivedFilter;
+    const totalPages = Math.ceil(total / limit);
+    const from = total === 0 ? 0 : skip + 1;
+    const to = Math.min(skip + pageRows.length, total);
+
+    return {
+      success: true,
+      data: pageRows,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages,
+        from,
+        to,
+        hasPreviousPage: page > 1,
+        hasNextPage: page < totalPages,
+        filters: {
+          status: requestedStatus ?? 'all',
+          search: search ?? null,
+        },
+      },
+    };
+  }
+
   async findOne(userId: string, id: string) {
     const payment = await this.prisma.payment.findFirst({
       where: { id, userId },
@@ -1118,6 +1256,133 @@ export class PaymentService {
     }
 
     return normalizedType as PaymentType;
+  }
+
+  private parsePrivateLessonStatus(status?: string) {
+    if (!status || status.toLowerCase() === 'all') {
+      return undefined;
+    }
+
+    const normalizedStatus = status.toLowerCase();
+    const allowedStatuses = ['live', 'upcoming', 'completed', 'cancelled'];
+
+    if (!allowedStatuses.includes(normalizedStatus)) {
+      throw new BadRequestException(
+        `Invalid status. Use one of: all, ${allowedStatuses.join(', ')}`,
+      );
+    }
+
+    return normalizedStatus;
+  }
+
+  private mapPrivateLesson(
+    payment: Prisma.PaymentGetPayload<{
+      include: {
+        user: {
+          select: {
+            id: true;
+            fullName: true;
+            email: true;
+            profile: {
+              select: {
+                avatarUrl: true;
+              };
+            };
+          };
+        };
+      };
+    }>,
+    pricePerHour: number | null,
+    defaultDurationMinutes: number,
+  ) {
+    const sessionCount =
+      pricePerHour && pricePerHour > 0
+        ? Math.max(1, Math.round(payment.amount / pricePerHour))
+        : 1;
+    const durationMinutes = sessionCount * defaultDurationMinutes;
+    const scheduledAt = payment.createdAt;
+    const endsAt = new Date(
+      scheduledAt.getTime() + durationMinutes * 60 * 1000,
+    );
+    const status = this.getPrivateLessonStatus(
+      payment.status,
+      scheduledAt,
+      endsAt,
+    );
+
+    return {
+      id: payment.id,
+      paymentId: payment.id,
+      student: {
+        id: payment.userId,
+        name: payment.user.fullName,
+        email: payment.user.email,
+        image: payment.user.profile?.avatarUrl ?? null,
+      },
+      dateTime: {
+        startsAt: scheduledAt,
+        endsAt,
+        date: scheduledAt,
+        time: scheduledAt,
+      },
+      duration: {
+        minutes: durationMinutes,
+        label: this.formatDuration(durationMinutes),
+        sessionCount,
+      },
+      amount: payment.amount,
+      currency: payment.currency,
+      status,
+      paymentStatus: this.formatPaymentStatus(payment.status),
+      payoutStatus: payment.payoutStatus.toLowerCase(),
+      canJoin: status === 'live',
+      createdAt: payment.createdAt,
+      updatedAt: payment.updatedAt,
+    };
+  }
+
+  private getPrivateLessonStatus(
+    paymentStatus: PaymentStatus,
+    startsAt: Date,
+    endsAt: Date,
+  ) {
+    if (
+      paymentStatus === PaymentStatus.CANCELLED ||
+      paymentStatus === PaymentStatus.FAILED
+    ) {
+      return 'cancelled';
+    }
+
+    if (paymentStatus === PaymentStatus.PENDING) {
+      return 'upcoming';
+    }
+
+    const now = new Date();
+
+    if (paymentStatus === PaymentStatus.PAID && now < startsAt) {
+      return 'upcoming';
+    }
+
+    if (paymentStatus === PaymentStatus.PAID && now <= endsAt) {
+      return 'live';
+    }
+
+    return 'completed';
+  }
+
+  private formatDuration(minutes: number) {
+    if (minutes < 60) {
+      return `${minutes} min`;
+    }
+
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+
+    if (remainingMinutes === 0) {
+      return hours === 1 ? '1 hr' : `${hours} hrs`;
+    }
+
+    return `${hours} hr ${remainingMinutes} min`;
   }
 
   private mapTutorTransaction(

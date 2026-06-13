@@ -4,7 +4,12 @@ import { CurrentUser, Roles } from '../auth/decorators/roles.decorator';
 import { Role } from '@prisma/client';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../auth/guards/auth.guard';
-import { ChangePasswordDto, CreatePaymentDto, UpdateSettingsDto } from './dto/settings.dto';
+import {
+    ChangePasswordDto,
+    CreatePaymentDto,
+    UpdateNotificationPreferencesDto,
+    UpdateSettingsDto,
+} from './dto/settings.dto';
 
 @ApiTags('Settings')
 @Controller('settings')
@@ -65,6 +70,28 @@ export class SettingsController {
         @Body() dto: ChangePasswordDto,
     ) {
         return this.settingsService.changePassword(
+            user.userId,
+            dto,
+        );
+    }
+
+    @Get('notifications')
+    @UseGuards(AuthGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Get notification preferences for current user' })
+    getNotificationPreferences(@CurrentUser() user: any) {
+        return this.settingsService.getNotificationPreferences(user.userId);
+    }
+
+    @Patch('notifications')
+    @UseGuards(AuthGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Update notification preferences for current user' })
+    updateNotificationPreferences(
+        @CurrentUser() user: any,
+        @Body() dto: UpdateNotificationPreferencesDto,
+    ) {
+        return this.settingsService.updateNotificationPreferences(
             user.userId,
             dto,
         );

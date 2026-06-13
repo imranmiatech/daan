@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsOptional,
   IsString,
   MinLength,
@@ -106,4 +107,46 @@ export class ChangePasswordDto {
   @IsString()
   @MinLength(6)
   newPassword: string;
+}
+
+export class UpdateNotificationPreferencesDto {
+  @ApiProperty({
+    example: true,
+    required: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  notifyCourseUpdates?: boolean;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  notifyNewContent?: boolean;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  notifyLessonReminders?: boolean;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  notifyNewMessages?: boolean;
+
+  @ApiProperty({
+    example: false,
+    required: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  notifyWeeklyDigest?: boolean;
 }

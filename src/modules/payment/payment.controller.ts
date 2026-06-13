@@ -119,6 +119,26 @@ export class PaymentController {
     });
   }
 
+  @Get('tutor/private-lessons')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.TUTOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get tutor private 1-on-1 lesson bookings' })
+  findTutorPrivateLessons(
+    @CurrentUser() user: { userId: string },
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.paymentService.findTutorPrivateLessons(user.userId, {
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+      status,
+      search,
+    });
+  }
+
   @Get(':id')
   @UseGuards(AuthGuard)
   @ApiBearerAuth()

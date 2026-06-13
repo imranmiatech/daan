@@ -29,31 +29,46 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, document);
   SwaggerModule.setup('api-docs', app, document);
 
-  // Enable CORS for frontend (default to localhost:5173)
+  const port = process.env.PORT ?? 3000;
+
+  // Enable CORS for local frontend, Swagger, and VS Code Live Server.
   const frontend = process.env.FRONTEND_URL || 'http://localhost:5173';
-  let origins: string[] | boolean = frontend.includes(',')
+  const configuredOrigins = frontend.includes(',')
     ? frontend.split(',').map((s) => s.trim())
     : [frontend.trim()];
+  const allowedOrigins = Array.from(
+    new Set([
+      ...configuredOrigins,
+      'http://localhost:5173',
+      'http://localhost:5174'
+    ]),
+  );
 
   // Allow wildcard origin in development if explicitly set to '*'
-  if (origins.length === 1 && origins[0] === '*') {
-    origins = true;
-  }
+  const allowAllOrigins =
+    configuredOrigins.length === 1 && configuredOrigins[0] === '*';
 
   app.enableCors({
-    origin: origins,
+    origin: allowAllOrigins
+      ? true
+      : (origin, callback) => {
+          if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+            return;
+          }
+
+          callback(null, false);
+        },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: 'Content-Type, Accept, Authorization, X-Requested-With',
     credentials: true,
   });
 
-  console.log('CORS origins:', origins === true ? '*' : origins);
+  console.log('CORS origins:', allowAllOrigins ? '*' : allowedOrigins);
 
-  await app.listen(process.env.PORT ?? 3000);
+  await app.listen(port);
 
-  console.log(
-    `Swagger running at: http://localhost:${process.env.PORT ?? 3000}/docs`,
-  );
+  console.log(`Swagger running at: http://localhost:${port}/docs`);
 }
 
 bootstrap().catch((error) => {

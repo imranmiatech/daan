@@ -1,6 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 
-import { ChangePasswordDto, CreatePaymentDto, UpdateSettingsDto } from './dto/settings.dto';
+import {
+    ChangePasswordDto,
+    CreatePaymentDto,
+    UpdateNotificationPreferencesDto,
+    UpdateSettingsDto,
+} from './dto/settings.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import * as bcrypt from "bcrypt";
 @Injectable()
@@ -166,5 +171,53 @@ export class SettingsService {
         };
     }
 
+    async getNotificationPreferences(userId: string) {
+        const preferences = await this.prisma.user.findUnique({
+            where: {
+                id: userId,
+            },
+            select: {
+                notifyCourseUpdates: true,
+                notifyNewContent: true,
+                notifyLessonReminders: true,
+                notifyNewMessages: true,
+                notifyWeeklyDigest: true,
+            },
+        });
+
+        if (!preferences) {
+            throw new NotFoundException('User not found');
+        }
+
+        return {
+            success: true,
+            data: preferences,
+        };
+    }
+
+    async updateNotificationPreferences(
+        userId: string,
+        dto: UpdateNotificationPreferencesDto,
+    ) {
+        const preferences = await this.prisma.user.update({
+            where: {
+                id: userId,
+            },
+            data: dto,
+            select: {
+                notifyCourseUpdates: true,
+                notifyNewContent: true,
+                notifyLessonReminders: true,
+                notifyNewMessages: true,
+                notifyWeeklyDigest: true,
+            },
+        });
+
+        return {
+            success: true,
+            message: 'Notification preferences updated successfully',
+            data: preferences,
+        };
+    }
 
 }

@@ -19,6 +19,7 @@ import { ClassesModule } from './modules/classes/classes.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { AdminDashboardModule } from './modules/admindashboard/admindashboard.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
+import { NotificationModule } from './modules/notification/notification.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { CalendarModule } from './modules/calendar/calendar.module';
     DashboardModule,
     AdminDashboardModule,
     CalendarModule,
+    NotificationModule,
   ],
   controllers: [AppController],
   providers: [AppService],

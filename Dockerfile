@@ -3,31 +3,27 @@ FROM node:22-alpine AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-# Install pnpm
-RUN npm install -g pnpm@latest
-
 # Copy package configurations
-COPY package.json pnpm-lock.yaml ./
+COPY package.json package-lock.json ./
 # Copy prisma schema to generate client
 COPY prisma ./prisma
 
 # Install dependencies and generate Prisma client
-RUN pnpm install --frozen-lockfile
+RUN npm ci
 
 # --- Stage 2: Builder ---
 FROM node:22-alpine AS builder
 WORKDIR /app
-RUN npm install -g pnpm@latest
 
 # Copy dependency tree and source code
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # Build the NestJS application
-RUN pnpm build
+RUN npm run build
 
 # Prune dev dependencies to minimize final image footprint
-RUN pnpm prune --prod
+RUN npm prune --omit=dev
 
 # --- Stage 3: Production Runner ---
 FROM node:22-alpine AS runner

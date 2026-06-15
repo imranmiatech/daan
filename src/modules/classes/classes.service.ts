@@ -1,10 +1,11 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { PaymentStatus, PaymentType, Prisma } from '@prisma/client';
+import { PaymentStatus, PaymentType, Prisma, Role } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AgoraService } from '../agora/agora.service';
 import {
@@ -18,6 +19,108 @@ export class ClassesService {
     private readonly prisma: PrismaService,
     private readonly agoraService: AgoraService,
   ) {}
+
+  async getStudentGroupClasses(studentId: string) {
+    await this.assertStudent(studentId);
+
+    const enrollments = await this.prisma.courseEnrollment.findMany({
+      where: {
+        studentId,
+        course: {
+          maxStudent: {
+            gt: 1,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      include: {
+        course: {
+          include: {
+            tutor: {
+              select: {
+                id: true,
+                fullName: true,
+                profile: {
+                  select: {
+                    avatarUrl: true,
+                  },
+                },
+              },
+            },
+            resources: {
+              orderBy: {
+                createdAt: 'desc',
+              },
+            },
+            curriculumProgress: {
+              where: {
+                studentId,
+              },
+              select: {
+                curriculumIndex: true,
+              },
+            },
+            _count: {
+              select: {
+                enrollments: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return {
+      success: true,
+      data: enrollments.map((enrollment) => {
+        const course = enrollment.course;
+        const totalSessions = course.curriculums.length || 1;
+        const completedSessions = new Set(
+          course.curriculumProgress.map((progress) => progress.curriculumIndex),
+        ).size;
+        const percentage =
+          totalSessions === 0
+            ? 0
+            : Math.round((completedSessions / totalSessions) * 100);
+        const sessions = this.getStudentCourseSessions(course);
+
+        return {
+          enrollmentId: enrollment.id,
+          courseId: course.id,
+          title: course.title,
+          image: course.image,
+          tutor: {
+            id: course.tutor.id,
+            name: course.tutor.fullName,
+            avatarUrl: course.tutor.profile?.avatarUrl ?? null,
+          },
+          enrolledAt: enrollment.createdAt,
+          studentCount: course._count.enrollments,
+          durationMinutes: course.classDuration,
+          durationLabel: `${course.classDuration} min`,
+          progress: {
+            completedSessions,
+            totalSessions,
+            percentage,
+            label: `${completedSessions}/${totalSessions} Sessions Completed`,
+          },
+          upcomingSessions: sessions
+            .filter((session) => ['live', 'upcoming'].includes(session.status))
+            .slice(0, 3),
+          resources: course.resources.map((resource) => ({
+            resourceId: resource.id,
+            name: resource.name,
+            url: resource.url,
+            size: resource.size ?? 'N/A',
+            downloads: resource.downloads,
+            createdAt: resource.createdAt,
+          })),
+        };
+      }),
+    };
+  }
 
   async getMeta(tutorId: string, courseId: string) {
     await this.assertTutorCourse(tutorId, courseId);
@@ -545,6 +648,60 @@ export class ClassesService {
     }
 
     return course;
+  }
+
+  private async assertStudent(studentId: string) {
+    const student = await this.prisma.user.findFirst({
+      where: {
+        id: studentId,
+        role: Role.STUDENT,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!student) {
+      throw new ForbiddenException('Only students can access group classes');
+    }
+  }
+
+  private getStudentCourseSessions(course: {
+    id: string;
+    title: string;
+    curriculums: string[];
+    startDate: Date;
+    time: string;
+    classDuration: number;
+  }) {
+    const lessonTitles = course.curriculums.length
+      ? course.curriculums
+      : [course.title];
+
+    return lessonTitles.map((title, curriculumIndex) => {
+      const date = new Date(course.startDate);
+      date.setDate(date.getDate() + curriculumIndex);
+      const startsAt = this.combineDateAndTime(date, course.time);
+      const endsAt = new Date(
+        startsAt.getTime() + course.classDuration * 60 * 1000,
+      );
+      const status = this.getLessonStatus(startsAt, course.classDuration);
+
+      return {
+        id: `${course.id}:${curriculumIndex}`,
+        curriculumIndex,
+        title: title || `Session ${curriculumIndex + 1}`,
+        date,
+        startsAt,
+        endsAt,
+        time: course.time,
+        dateLabel: this.formatDate(date),
+        timeLabel: this.formatTime(startsAt),
+        durationMinutes: course.classDuration,
+        status,
+        joinAvailable: status === 'live' || status === 'upcoming',
+      };
+    });
   }
 
   private async getCourseLessons(courseId: string) {

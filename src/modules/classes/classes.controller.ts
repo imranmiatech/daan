@@ -23,6 +23,7 @@ import { ClassesService } from './classes.service';
 import {
   ClassStudentsQueryDto,
   CreateClassResourceDto,
+  TutorGroupClassesQueryDto,
 } from './dto/classes.dto';
 
 @ApiTags('Classes')
@@ -96,6 +97,66 @@ export class ClassesController {
   })
   getStudentGroupClasses(@CurrentUser() user: { userId: string }) {
     return this.classesService.getStudentGroupClasses(user.userId);
+  }
+
+  @Get('tutor/group-classes')
+  @ApiOperation({
+    summary: 'Get tutor group class cards with search and status filters',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Tutor group class cards retrieved.',
+    schema: {
+      example: {
+        success: true,
+        filters: {
+          search: null,
+          status: 'all',
+        },
+        data: [
+          {
+            courseId: 'course_data_science_bootcamp',
+            title: 'Data Science Bootcamp',
+            category: 'Data Science',
+            image: 'https://example.com/courses/data-science.jpg',
+            status: 'upcoming',
+            statusLabel: 'Active',
+            progress: {
+              completedLessons: 13,
+              totalLessons: 20,
+              percentage: 65,
+              label: 'Course Completion',
+            },
+            nextClass: {
+              id: 'course_data_science_bootcamp-13',
+              title: 'Model Evaluation',
+              date: '2026-05-24T00:00:00.000Z',
+              dateLabel: 'May 24',
+              time: '2:20 pm',
+              status: 'upcoming',
+            },
+            price: '$206',
+            enrolled: {
+              current: 8,
+              max: 15,
+              label: '8/15 students',
+            },
+            actions: {
+              manageCourse: '/classes/course_data_science_bootcamp/overview',
+              viewStudents:
+                '/classes/course_data_science_bootcamp/enrolled-students',
+              deleteCourse: '/course/course_data_science_bootcamp',
+            },
+          },
+        ],
+      },
+    },
+  })
+  getTutorGroupClasses(
+    @CurrentUser() user: { userId: string },
+    @Query() query: TutorGroupClassesQueryDto,
+  ) {
+    return this.classesService.getTutorGroupClasses(user.userId, query);
   }
 
   @Get(':courseId/meta')

@@ -11,6 +11,7 @@ import { AgoraService } from '../agora/agora.service';
 import {
   ClassStudentsQueryDto,
   CreateClassResourceDto,
+  TutorGroupClassesQueryDto,
 } from './dto/classes.dto';
 
 @Injectable()
@@ -19,6 +20,136 @@ export class ClassesService {
     private readonly prisma: PrismaService,
     private readonly agoraService: AgoraService,
   ) {}
+
+  async getTutorGroupClasses(
+    tutorId: string,
+    query: TutorGroupClassesQueryDto,
+  ) {
+    const search = query.search?.trim();
+    const status = query.status ?? 'all';
+
+    const where: Prisma.CourseWhereInput = {
+      tutorId,
+      maxStudent: {
+        gt: 1,
+      },
+      ...(search && {
+        OR: [
+          {
+            title: {
+              contains: search,
+              mode: 'insensitive',
+            },
+          },
+          {
+            category: {
+              contains: search,
+              mode: 'insensitive',
+            },
+          },
+        ],
+      }),
+    };
+
+    const courses = await this.prisma.course.findMany({
+      where,
+      orderBy: {
+        createdAt: 'desc',
+      },
+      select: {
+        id: true,
+        title: true,
+        category: true,
+        image: true,
+        curriculums: true,
+        startDate: true,
+        time: true,
+        classDuration: true,
+        pricePerStudent: true,
+        maxStudent: true,
+        _count: {
+          select: {
+            enrollments: true,
+          },
+        },
+      },
+    });
+
+    const cards = courses
+      .map((course) => {
+        const lessons = this.buildCourseLessonsFromCourse(course);
+        const completedLessons = lessons.filter(
+          (lesson) => lesson.status === 'completed',
+        ).length;
+        const totalLessons = lessons.length || 1;
+        const progressPercentage = Math.round(
+          (completedLessons / totalLessons) * 100,
+        );
+        const currentOrNextLesson =
+          lessons.find((lesson) =>
+            ['live', 'upcoming'].includes(lesson.status),
+          ) ?? null;
+        const courseStatus = this.getCourseCardStatus(lessons);
+
+        return {
+          courseId: course.id,
+          title: course.title,
+          category: course.category,
+          image: course.image,
+          status: courseStatus,
+          statusLabel:
+            courseStatus === 'completed'
+              ? 'Completed'
+              : courseStatus === 'live'
+                ? 'Live'
+                : 'Active',
+          progress: {
+            completedLessons,
+            totalLessons,
+            percentage: progressPercentage,
+            label: 'Course Completion',
+          },
+          nextClass: currentOrNextLesson
+            ? {
+                id: currentOrNextLesson.id,
+                title: currentOrNextLesson.title,
+                date: currentOrNextLesson.date,
+                dateLabel: this.formatShortDate(currentOrNextLesson.date),
+                time: currentOrNextLesson.time,
+                status: currentOrNextLesson.status,
+              }
+            : {
+                id: null,
+                title: null,
+                date: null,
+                dateLabel: 'Completed',
+                time: null,
+                status: 'completed',
+              },
+          price: `$${course.pricePerStudent}`,
+          enrolled: {
+            current: course._count.enrollments,
+            max: course.maxStudent,
+            label: `${course._count.enrollments}/${course.maxStudent} students`,
+          },
+          actions: {
+            manageCourse: `/classes/${course.id}/overview`,
+            viewStudents: `/classes/${course.id}/enrolled-students`,
+            deleteCourse: `/course/${course.id}`,
+          },
+        };
+      })
+      .filter((card) => this.matchesTutorClassStatus(card.status, status));
+
+    return {
+      success: true,
+      filters: {
+        search: search ?? null,
+        status,
+      },
+      data: cards,
+    };
+  }
 
   async getStudentGroupClasses(studentId: string) {
     await this.assertStudent(studentId);
@@ -704,6 +835,65 @@ export class ClassesService {
     });
   }
 
+  private buildCourseLessonsFromCourse(course: {
+    id: string;
+    title: string;
+    curriculums: string[];
+    startDate: Date;
+    time: string;
+    classDuration: number;
+  }) {
+    const lessonTitles = course.curriculums.length
+      ? course.curriculums
+      : [course.title];
+
+    return lessonTitles.map((title, index) => {
+      const date = new Date(course.startDate);
+      date.setDate(date.getDate() + index);
+      const lessonDate = this.combineDateAndTime(date, course.time);
+
+      return {
+        id: `${course.id}-${index}`,
+        title: title || `Session ${index + 1}`,
+        date,
+        time: course.time,
+        durationMinutes: course.classDuration,
+        status: this.getLessonStatus(lessonDate, course.classDuration),
+      };
+    });
+  }
+
+  private getCourseCardStatus(
+    lessons: {
+      status: string;
+    }[],
+  ) {
+    if (lessons.some((lesson) => lesson.status === 'live')) {
+      return 'live';
+    }
+
+    if (lessons.some((lesson) => lesson.status === 'upcoming')) {
+      return 'upcoming';
+    }
+
+    return 'completed';
+  }
+
+  private matchesTutorClassStatus(
+    courseStatus: string,
+    filter: NonNullable<TutorGroupClassesQueryDto['status']>,
+  ) {
+    if (filter === 'all') {
+      return true;
+    }
+
+    if (filter === 'active') {
+      return courseStatus === 'live' || courseStatus === 'upcoming';
+    }
+
+    return courseStatus === filter;
+  }
+
   private async getCourseLessons(courseId: string) {
     const course = await this.prisma.course.findUnique({
       where: { id: courseId },
@@ -822,6 +1012,13 @@ export class ClassesService {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
+    });
+  }
+
+  private formatShortDate(date: Date) {
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
     });
   }
 

@@ -21,7 +21,11 @@ import { CurrentUser, Roles } from '../auth/decorators/roles.decorator';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CourseService } from './course.service';
-import { CreateCourseDto, UpcomingCourseQueryDto } from './dto/course.dto';
+import {
+  CreateCourseDto,
+  UpcomingCourseQueryDto,
+  UpdateCourseLessonDto,
+} from './dto/course.dto';
 
 @ApiTags('Course')
 @Controller('course')
@@ -102,6 +106,75 @@ export class CourseController {
     return this.courseService.completeCurriculum(
       id,
       curriculumIndex,
+      user.userId,
+    );
+  }
+
+  @Patch(':id/curriculum-items/:curriculumItemId')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.TUTOR, Role.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update a course lesson date, time, or title' })
+  @ApiResponse({
+    status: 200,
+    description: 'Course lesson updated successfully.',
+    schema: {
+      example: {
+        success: true,
+        message: 'Course lesson updated successfully',
+        data: {
+          id: '4c3e4ece-1803-40ca-a53a-07cb8a1c6e2b-curriculum-0',
+          courseId: '4c3e4ece-1803-40ca-a53a-07cb8a1c6e2b',
+          title: 'JavaScript Fundamentals',
+          date: '2026-06-20T00:00:00.000Z',
+          time: '10:00',
+        },
+      },
+    },
+  })
+  updateCurriculumItem(
+    @Param('id') id: string,
+    @Param('curriculumItemId') curriculumItemId: string,
+    @CurrentUser() user: { userId: string },
+    @Body() dto: UpdateCourseLessonDto,
+  ) {
+    return this.courseService.updateCurriculumItem(
+      id,
+      curriculumItemId,
+      user.userId,
+      dto,
+    );
+  }
+
+  @Delete(':id/curriculum-items/:curriculumItemId')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.TUTOR, Role.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Delete a lesson from a tutor course' })
+  @ApiResponse({
+    status: 200,
+    description: 'Course lesson deleted successfully.',
+    schema: {
+      example: {
+        success: true,
+        message: 'Course lesson deleted successfully',
+        data: {
+          courseId: '4c3e4ece-1803-40ca-a53a-07cb8a1c6e2b',
+          deletedCurriculumItemId:
+            '4c3e4ece-1803-40ca-a53a-07cb8a1c6e2b-curriculum-0',
+          remainingLessons: 4,
+        },
+      },
+    },
+  })
+  deleteCurriculumItem(
+    @Param('id') id: string,
+    @Param('curriculumItemId') curriculumItemId: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.courseService.deleteCurriculumItem(
+      id,
+      curriculumItemId,
       user.userId,
     );
   }

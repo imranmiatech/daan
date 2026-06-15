@@ -1,4 +1,5 @@
 import {
+  ArrayMinSize,
   IsArray,
   IsDateString,
   IsEnum,
@@ -6,7 +7,34 @@ import {
   IsOptional,
   IsString,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class CreateCourseLessonDto {
+  @IsString()
+  title!: string;
+
+  @IsDateString()
+  date!: string;
+
+  @IsString()
+  time!: string;
+}
+
+export class UpdateCourseLessonDto {
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date?: string;
+
+  @IsOptional()
+  @IsString()
+  time?: string;
+}
 
 export class CreateCourseDto {
   @IsString()
@@ -32,14 +60,24 @@ export class CreateCourseDto {
   @IsString()
   image?: string;
 
+  @IsOptional()
   @IsArray()
-  curriculums!: string[];
+  curriculums?: string[];
 
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateCourseLessonDto)
+  curriculumItems?: CreateCourseLessonDto[];
+
+  @IsOptional()
   @IsDateString()
-  startDate!: string;
+  startDate?: string;
 
+  @IsOptional()
   @IsString()
-  time!: string;
+  time?: string;
 
   @IsString()
   timeZone!: string;

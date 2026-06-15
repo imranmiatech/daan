@@ -10,9 +10,11 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import {
   CoursePriceFilter,
   CourseSubjectFilter,
+  CreateCourseLessonDto,
   CreateCourseDto,
   UpcomingCourseDateFilter,
   UpcomingCourseQueryDto,
+  UpdateCourseLessonDto,
 } from './dto/course.dto';
 
 type CourseWithTutor = Prisma.CourseGetPayload<{
@@ -72,13 +74,30 @@ export class CourseService {
       );
     }
 
-    const course = await this.prisma.course.create({
-      data: {
-        ...dto,
-        startDate: new Date(dto.startDate),
-        enrollmentDeadline: new Date(dto.enrollmentDeadline),
-        tutorId,
-      },
+    const curriculumItems = this.normalizeCourseLessons(dto);
+    const { curriculumItems: _curriculumItems, ...courseDto } = dto;
+    const course = await this.prisma.$transaction(async (tx) => {
+      const createdCourse = await tx.course.create({
+        data: {
+          ...courseDto,
+          curriculums: curriculumItems.map((item) => item.title),
+          startDate: new Date(dto.startDate ?? curriculumItems[0].date),
+          time: dto.time ?? curriculumItems[0].time,
+          enrollmentDeadline: new Date(dto.enrollmentDeadline),
+          tutorId,
+        },
+      });
+
+      await tx.curriculum.createMany({
+        data: curriculumItems.map((item) => ({
+          courseId: createdCourse.id,
+          title: item.title,
+          date: new Date(item.date),
+          time: item.time,
+        })),
+      });
+
+      return createdCourse;
     });
 
     return {
@@ -149,25 +168,189 @@ export class CourseService {
       );
     }
 
-    const updatedCourse = await this.prisma.course.update({
-      where: {
-        id: courseId,
-      },
-      data: {
-        ...dto,
-        ...(dto.startDate && {
-          startDate: new Date(dto.startDate),
-        }),
-        ...(dto.enrollmentDeadline && {
-          enrollmentDeadline: new Date(dto.enrollmentDeadline),
-        }),
-      },
+    const curriculumItems = dto.curriculumItems
+      ? this.normalizeCourseLessons(dto)
+      : null;
+    const { curriculumItems: _curriculumItems, ...courseDto } = dto;
+    const updatedCourse = await this.prisma.$transaction(async (tx) => {
+      const savedCourse = await tx.course.update({
+        where: {
+          id: courseId,
+        },
+        data: {
+          ...courseDto,
+          ...(curriculumItems && {
+            curriculums: curriculumItems.map((item) => item.title),
+            startDate: new Date(dto.startDate ?? curriculumItems[0].date),
+            time: dto.time ?? curriculumItems[0].time,
+          }),
+          ...(dto.startDate &&
+            !curriculumItems && {
+              startDate: new Date(dto.startDate),
+            }),
+          ...(dto.enrollmentDeadline && {
+            enrollmentDeadline: new Date(dto.enrollmentDeadline),
+          }),
+        },
+      });
+
+      if (curriculumItems) {
+        await tx.curriculum.deleteMany({
+          where: {
+            courseId,
+          },
+        });
+
+        await tx.curriculum.createMany({
+          data: curriculumItems.map((item) => ({
+            courseId,
+            title: item.title,
+            date: new Date(item.date),
+            time: item.time,
+          })),
+        });
+      }
+
+      return savedCourse;
     });
 
     return {
       success: true,
       message: 'Course updated successfully',
       data: updatedCourse,
+    };
+  }
+
+  async updateCurriculumItem(
+    courseId: string,
+    curriculumItemId: string,
+    tutorId: string,
+    dto: UpdateCourseLessonDto,
+  ) {
+    await this.assertTutorCourse(courseId, tutorId);
+
+    if (!dto.title && !dto.date && !dto.time) {
+      throw new BadRequestException(
+        'Provide title, date, or time to update this lesson',
+      );
+    }
+
+    const existingItem = await this.prisma.curriculum.findFirst({
+      where: {
+        id: curriculumItemId,
+        courseId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!existingItem) {
+      throw new NotFoundException('Course lesson not found');
+    }
+
+    const updatedItem = await this.prisma.$transaction(async (tx) => {
+      const item = await tx.curriculum.update({
+        where: {
+          id: curriculumItemId,
+        },
+        data: {
+          ...(dto.title && { title: dto.title }),
+          ...(dto.date && { date: new Date(dto.date) }),
+          ...(dto.time && { time: dto.time }),
+        },
+      });
+
+      await this.syncCourseCurriculumTitles(tx, courseId);
+
+      return item;
+    });
+
+    return {
+      success: true,
+      message: 'Course lesson updated successfully',
+      data: updatedItem,
+    };
+  }
+
+  async deleteCurriculumItem(
+    courseId: string,
+    curriculumItemId: string,
+    tutorId: string,
+  ) {
+    await this.assertTutorCourse(courseId, tutorId);
+
+    const items = await this.getOrderedCurriculumItems(courseId);
+    const deleteIndex = items.findIndex((item) => item.id === curriculumItemId);
+
+    if (deleteIndex === -1) {
+      throw new NotFoundException('Course lesson not found');
+    }
+
+    if (items.length <= 1) {
+      throw new BadRequestException('A course must have at least one lesson');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.curriculum.delete({
+        where: {
+          id: curriculumItemId,
+        },
+      });
+
+      await tx.curriculumProgress.deleteMany({
+        where: {
+          courseId,
+          curriculumIndex: deleteIndex,
+        },
+      });
+
+      await tx.studentLessonState.deleteMany({
+        where: {
+          courseId,
+          curriculumIndex: deleteIndex,
+        },
+      });
+
+      await tx.curriculumProgress.updateMany({
+        where: {
+          courseId,
+          curriculumIndex: {
+            gt: deleteIndex,
+          },
+        },
+        data: {
+          curriculumIndex: {
+            decrement: 1,
+          },
+        },
+      });
+
+      await tx.studentLessonState.updateMany({
+        where: {
+          courseId,
+          curriculumIndex: {
+            gt: deleteIndex,
+          },
+        },
+        data: {
+          curriculumIndex: {
+            decrement: 1,
+          },
+        },
+      });
+
+      await this.syncCourseCurriculumTitles(tx, courseId);
+    });
+
+    return {
+      success: true,
+      message: 'Course lesson deleted successfully',
+      data: {
+        courseId,
+        deletedCurriculumItemId: curriculumItemId,
+        remainingLessons: items.length - 1,
+      },
     };
   }
 
@@ -450,6 +633,11 @@ export class CourseService {
 
   private getCourseTutorInclude() {
     return {
+      curriculumItems: {
+        orderBy: {
+          date: 'asc',
+        },
+      },
       tutor: {
         select: {
           id: true,
@@ -467,6 +655,108 @@ export class CourseService {
         },
       },
     } satisfies Prisma.CourseInclude;
+  }
+
+  private async assertTutorCourse(courseId: string, tutorId: string) {
+    const course = await this.prisma.course.findUnique({
+      where: {
+        id: courseId,
+      },
+      select: {
+        id: true,
+        tutorId: true,
+      },
+    });
+
+    if (!course) {
+      throw new NotFoundException('Course not found');
+    }
+
+    if (course.tutorId !== tutorId) {
+      throw new UnauthorizedException('You cannot modify this course');
+    }
+
+    return course;
+  }
+
+  private getOrderedCurriculumItems(courseId: string) {
+    return this.prisma.curriculum.findMany({
+      where: {
+        courseId,
+      },
+      orderBy: [{ date: 'asc' }, { time: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        title: true,
+      },
+    });
+  }
+
+  private async syncCourseCurriculumTitles(
+    tx: Prisma.TransactionClient,
+    courseId: string,
+  ) {
+    const items = await tx.curriculum.findMany({
+      where: {
+        courseId,
+      },
+      orderBy: [{ date: 'asc' }, { time: 'asc' }, { id: 'asc' }],
+      select: {
+        title: true,
+        date: true,
+        time: true,
+      },
+    });
+
+    if (items.length === 0) {
+      return;
+    }
+
+    await tx.course.update({
+      where: {
+        id: courseId,
+      },
+      data: {
+        curriculums: items.map((item) => item.title),
+        startDate: items[0].date,
+        time: items[0].time,
+      },
+    });
+  }
+
+  private normalizeCourseLessons(
+    dto: CreateCourseDto,
+  ): CreateCourseLessonDto[] {
+    if (dto.curriculumItems?.length) {
+      return dto.curriculumItems.map((item) => ({
+        title: item.title,
+        date: item.date,
+        time: item.time,
+      }));
+    }
+
+    if (!dto.curriculums?.length) {
+      throw new BadRequestException(
+        'Provide curriculums or curriculumItems for this course',
+      );
+    }
+
+    if (!dto.startDate || !dto.time) {
+      throw new BadRequestException(
+        'startDate and time are required when using curriculums as lesson titles only',
+      );
+    }
+
+    return dto.curriculums.map((title, index) => {
+      const date = new Date(dto.startDate as string);
+      date.setDate(date.getDate() + index);
+
+      return {
+        title,
+        date: date.toISOString(),
+        time: dto.time as string,
+      };
+    });
   }
 
   private getUpcomingStartDateFilter(

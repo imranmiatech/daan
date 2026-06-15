@@ -33,6 +33,71 @@ import {
 export class ClassesController {
   constructor(private readonly classesService: ClassesService) {}
 
+  @Get('student/group-classes')
+  @Roles(Role.STUDENT)
+  @ApiOperation({
+    summary: 'Get group classes enrolled by the current student',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Student group classes retrieved.',
+    schema: {
+      example: {
+        success: true,
+        data: [
+          {
+            enrollmentId: 'enrollment_01',
+            courseId: 'course_javascript_advanced',
+            title: 'JavaScript Advanced Concepts',
+            image: 'https://example.com/images/javascript-course.jpg',
+            tutor: {
+              id: 'tutor_01',
+              name: 'David Chen',
+              avatarUrl: 'https://example.com/avatars/david-chen.jpg',
+            },
+            enrolledAt: '2026-06-01T10:00:00.000Z',
+            studentCount: 12,
+            durationMinutes: 90,
+            durationLabel: '90 min',
+            progress: {
+              completedSessions: 9,
+              totalSessions: 15,
+              percentage: 60,
+              label: '9/15 Sessions Completed',
+            },
+            upcomingSessions: [
+              {
+                id: 'course_javascript_advanced:13',
+                curriculumIndex: 13,
+                title: 'Session 14',
+                date: '2026-06-16T00:00:00.000Z',
+                startsAt: '2026-06-16T15:00:00.000Z',
+                time: '3:00 pm',
+                dateLabel: 'Jun 16, 2026',
+                timeLabel: '3:00 PM',
+                status: 'upcoming',
+                joinAvailable: true,
+              },
+            ],
+            resources: [
+              {
+                resourceId: 'resource_01',
+                name: 'Course Syllabus.pdf',
+                url: 'https://example.com/resources/syllabus.pdf',
+                size: '2.4 MB',
+                downloads: 18,
+                createdAt: '2026-06-01T12:00:00.000Z',
+              },
+            ],
+          },
+        ],
+      },
+    },
+  })
+  getStudentGroupClasses(@CurrentUser() user: { userId: string }) {
+    return this.classesService.getStudentGroupClasses(user.userId);
+  }
+
   @Get(':courseId/meta')
   @ApiOperation({ summary: 'Get tutor class page metadata cards' })
   @ApiResponse({ status: 200, description: 'Class metadata retrieved.' })

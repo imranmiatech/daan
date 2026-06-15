@@ -26,7 +26,15 @@ export class CalendarService {
       where: { studentId },
       include: {
         course: {
-          include: {
+          select: {
+            id: true,
+            title: true,
+            curriculums: true,
+            startDate: true,
+            time: true,
+            timeZone: true,
+            classDuration: true,
+            maxStudent: true,
             tutor: {
               select: {
                 id: true,
@@ -38,14 +46,6 @@ export class CalendarService {
                 },
               },
             },
-            lessonStates: {
-              where: { studentId },
-              select: {
-                curriculumIndex: true,
-                status: true,
-                reason: true,
-              },
-            },
           },
         },
       },
@@ -53,6 +53,24 @@ export class CalendarService {
         createdAt: 'desc',
       },
     });
+    const lessonStates = await this.prisma.$queryRaw<
+      {
+        courseId: string;
+        curriculumIndex: number;
+        status: string;
+        reason: string | null;
+      }[]
+    >`
+      SELECT "courseId", "curriculumIndex", "status", "reason"
+      FROM "StudentLessonState"
+      WHERE "studentId" = ${studentId}
+    `;
+    const stateByLesson = new Map(
+      lessonStates.map((state) => [
+        this.getLessonKey(state.courseId, state.curriculumIndex),
+        state,
+      ]),
+    );
 
     const events = enrollments
       .flatMap((enrollment) => {
@@ -60,9 +78,6 @@ export class CalendarService {
         const lessonTitles = course.curriculums.length
           ? course.curriculums
           : [course.title];
-        const stateByIndex = new Map(
-          course.lessonStates.map((state) => [state.curriculumIndex, state]),
-        );
 
         return lessonTitles.map((lessonTitle, index) => {
           const date = new Date(course.startDate);
@@ -72,7 +87,7 @@ export class CalendarService {
           const endsAt = new Date(
             startsAt.getTime() + course.classDuration * 60 * 1000,
           );
-          const state = stateByIndex.get(index);
+          const state = stateByLesson.get(this.getLessonKey(course.id, index));
           const status =
             state?.status === 'cancelled'
               ? 'cancelled'
@@ -432,5 +447,9 @@ export class CalendarService {
       date.getMonth() === compareDate.getMonth() &&
       date.getDate() === compareDate.getDate()
     );
+  }
+
+  private getLessonKey(courseId: string, curriculumIndex: number) {
+    return `${courseId}:${curriculumIndex}`;
   }
 }

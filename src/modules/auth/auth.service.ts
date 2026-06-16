@@ -134,7 +134,7 @@ export class AuthService {
       },
       process.env.JWT_ACCESS_SECRET!,
       {
-        expiresIn: '15m',
+        expiresIn: '1d',
       },
     );
 
@@ -276,7 +276,6 @@ export class AuthService {
       where: { id: userId },
       select: {
         id: true,
-        email: true,
       },
     });
 
@@ -287,9 +286,6 @@ export class AuthService {
     await this.prisma.user.delete({
       where: { id: user.id },
     });
-
-    await this.redis.del(this.getPasswordResetOtpKey(user.email));
-    await this.redis.del(this.getPasswordResetCooldownKey(user.email));
 
     return {
       success: true,

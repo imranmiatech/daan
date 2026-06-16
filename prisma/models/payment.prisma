@@ -12,7 +12,10 @@ enum PaymentType {
 
 enum PayoutStatus {
   PENDING
+  ON_HOLD
+  PROCESSING
   PAID
+  FAILED
 }
 
 model Payment {
@@ -25,6 +28,14 @@ model Payment {
   status                PaymentStatus @default(PENDING)
   type                  PaymentType
   payoutStatus          PayoutStatus  @default(PENDING)
+  paidAt                DateTime?
+  holdUntil             DateTime?
+  commissionRate        Float         @default(0.2)
+  commissionAmount      Float         @default(0)
+  tutorAmount           Float         @default(0)
+  paidOutAt             DateTime?
+  payoutTransferId      String?
+  payoutFailureReason   String?
   stripeSessionId       String?       @unique
   stripePaymentIntentId String?
   createdAt             DateTime      @default(now())

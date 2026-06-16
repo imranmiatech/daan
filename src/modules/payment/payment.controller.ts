@@ -500,6 +500,41 @@ export class PaymentController {
     });
   }
 
+  @Post('tutor/connect/onboarding')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.TUTOR)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Create Stripe Connect onboarding link for tutor payouts',
+    description:
+      'Tutor uses this URL to connect a bank account through Stripe. Automatic payouts require payoutsEnabled to be true.',
+  })
+  createTutorConnectOnboarding(@CurrentUser() user: { userId: string }) {
+    return this.paymentService.createTutorConnectOnboarding(user.userId);
+  }
+
+  @Get('tutor/connect/status')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.TUTOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Sync and get tutor Stripe Connect payout status' })
+  syncTutorConnectStatus(@CurrentUser() user: { userId: string }) {
+    return this.paymentService.syncTutorConnectStatus(user.userId);
+  }
+
+  @Post('admin/payouts/process-due')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Manually run the automatic payout processor',
+    description:
+      'Processes paid payments whose 48-hour hold period has ended. The same processor also runs in the background.',
+  })
+  processDuePayouts() {
+    return this.paymentService.processDuePayouts();
+  }
+
   @Get(':id')
   @UseGuards(AuthGuard)
   @ApiBearerAuth()

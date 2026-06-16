@@ -10,6 +10,7 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AdminBookingManagementQueryDto } from './dto/admin-booking-management-query.dto';
 import { AdminPaymentOverviewQueryDto } from './dto/admin-payment-overview-query.dto';
+import { AdminPayoutManagementQueryDto } from './dto/admin-payout-management-query.dto';
 import { TutorStatusFilter } from './dto/tutor-status-query.dto';
 
 type AdminBookingPayment = Prisma.PaymentGetPayload<{
@@ -372,7 +373,7 @@ export class AdminDashboardService {
           status: PaymentStatus.PAID,
         },
         _sum: {
-          amount: true,
+          commissionAmount: true,
         },
       }),
     ]);
@@ -404,6 +405,10 @@ export class AdminDashboardService {
             : null,
           amount: payment.amount,
           amountLabel: this.formatCurrency(payment.amount),
+          commissionAmount: payment.commissionAmount,
+          commissionAmountLabel: this.formatCurrency(payment.commissionAmount),
+          tutorAmount: payment.tutorAmount,
+          tutorAmountLabel: this.formatCurrency(payment.tutorAmount),
           currency: payment.currency,
           type: payment.type,
           typeLabel: this.formatPaymentType(payment.type),
@@ -413,12 +418,17 @@ export class AdminDashboardService {
           statusLabel: this.formatPaymentStatus(payment.status),
           payoutStatus: payment.payoutStatus,
           payoutStatusLabel: this.formatPayoutStatus(payment.payoutStatus),
+          holdUntil: payment.holdUntil,
+          holdUntilLabel: payment.holdUntil
+            ? this.formatFullDate(payment.holdUntil)
+            : null,
+          paidOutAt: payment.paidOutAt,
+          payoutTransferId: payment.payoutTransferId,
+          payoutFailureReason: payment.payoutFailureReason,
         })),
         filteredSummary: {
           totalRevenue: filteredTotalRevenue._sum.amount ?? 0,
-          commissionRevenue: this.calculateCommission(
-            filteredCommissionRevenue._sum.amount ?? 0,
-          ),
+          commissionRevenue: filteredCommissionRevenue._sum.commissionAmount ?? 0,
         },
         filters: {
           search: search ?? null,
@@ -426,6 +436,110 @@ export class AdminDashboardService {
           status,
         },
         meta: this.buildPaginationMeta(page, limit, total, payments.length),
+      },
+    };
+  }
+
+  async getPayoutManagement(query: AdminPayoutManagementQueryDto) {
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(Math.max(1, query.limit ?? 10), 100);
+    const skip = (page - 1) * limit;
+    const search = query.search?.trim();
+    const status = query.status ?? 'all';
+
+    const where: Prisma.PaymentWhereInput = {
+      status: PaymentStatus.PAID,
+      ...(status !== 'all' && { payoutStatus: status }),
+      ...(search && {
+        OR: [
+          { id: { contains: search, mode: 'insensitive' } },
+          {
+            tutor: {
+              fullName: { contains: search, mode: 'insensitive' },
+            },
+          },
+          {
+            tutor: {
+              email: { contains: search, mode: 'insensitive' },
+            },
+          },
+        ],
+      }),
+    };
+
+    const [total, payouts] = await Promise.all([
+      this.prisma.payment.count({ where }),
+      this.prisma.payment.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [
+          {
+            paidOutAt: 'desc',
+          },
+          {
+            holdUntil: 'desc',
+          },
+          {
+            createdAt: 'desc',
+          },
+        ],
+        include: {
+          tutor: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              paymentInfo: {
+                select: {
+                  paymentMethod: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      success: true,
+      data: {
+        title: 'Payout Management',
+        subtitle: 'Manage teacher payouts and payment processing.',
+        payouts: payouts.map((payment) => {
+          const date = payment.paidOutAt ?? payment.holdUntil ?? payment.createdAt;
+
+          return {
+            payoutId: payment.id,
+            teacher: {
+              id: payment.tutor.id,
+              name: payment.tutor.fullName,
+              email: payment.tutor.email,
+            },
+            amount: payment.tutorAmount,
+            amountLabel: this.formatCurrency(payment.tutorAmount),
+            grossAmount: payment.amount,
+            grossAmountLabel: this.formatCurrency(payment.amount),
+            commissionAmount: payment.commissionAmount,
+            commissionAmountLabel: this.formatCurrency(payment.commissionAmount),
+            currency: payment.currency,
+            method: payment.tutor.paymentInfo?.paymentMethod ?? 'Stripe Connect',
+            date,
+            dateLabel: this.formatFullDate(date),
+            status: payment.payoutStatus,
+            statusLabel: this.formatPayoutStatus(payment.payoutStatus),
+            paidAt: payment.paidAt,
+            holdUntil: payment.holdUntil,
+            paidOutAt: payment.paidOutAt,
+            payoutTransferId: payment.payoutTransferId,
+            payoutFailureReason: payment.payoutFailureReason,
+          };
+        }),
+        filters: {
+          search: search ?? null,
+          status,
+        },
+        meta: this.buildPaginationMeta(page, limit, total, payouts.length),
       },
     };
   }
@@ -666,17 +780,23 @@ export class AdminDashboardService {
       this.prisma.payment.aggregate({
         where: {
           status: PaymentStatus.PAID,
-          payoutStatus: PayoutStatus.PENDING,
+          payoutStatus: {
+            in: [
+              PayoutStatus.ON_HOLD,
+              PayoutStatus.PROCESSING,
+              PayoutStatus.FAILED,
+            ],
+          },
         },
         _sum: {
-          amount: true,
+          tutorAmount: true,
         },
       }),
     ]);
 
     const totalRevenue = paidRevenue._sum.amount ?? 0;
     const lastMonthRevenue = previousMonthRevenue._sum.amount ?? 0;
-    const pendingPayoutAmount = pendingPayouts._sum.amount ?? 0;
+    const pendingPayoutAmount = pendingPayouts._sum.tutorAmount ?? 0;
 
     return {
       totalRevenue: {
@@ -895,7 +1015,7 @@ export class AdminDashboardService {
           status: PaymentStatus.PAID,
         },
         _sum: {
-          amount: true,
+          commissionAmount: true,
         },
       }),
       this.prisma.payment.aggregate({
@@ -912,17 +1032,15 @@ export class AdminDashboardService {
           payoutStatus: PayoutStatus.PAID,
         },
         _sum: {
-          amount: true,
+          tutorAmount: true,
         },
       }),
     ]);
 
     const totalRevenueAmount = totalRevenue._sum.amount ?? 0;
-    const commissionRevenue = this.calculateCommission(
-      paidRevenue._sum.amount ?? 0,
-    );
+    const commissionRevenue = paidRevenue._sum.commissionAmount ?? 0;
     const pendingPaymentsAmount = pendingPayments._sum.amount ?? 0;
-    const completedPayoutsAmount = completedPayouts._sum.amount ?? 0;
+    const completedPayoutsAmount = completedPayouts._sum.tutorAmount ?? 0;
 
     return {
       totalRevenue: {
@@ -1018,7 +1136,15 @@ export class AdminDashboardService {
   }
 
   private formatPayoutStatus(status: PayoutStatus) {
-    return status === PayoutStatus.PAID ? 'Paid' : 'Pending';
+    const labels: Record<PayoutStatus, string> = {
+      [PayoutStatus.PENDING]: 'Pending',
+      [PayoutStatus.ON_HOLD]: 'On Hold',
+      [PayoutStatus.PROCESSING]: 'Processing',
+      [PayoutStatus.PAID]: 'Paid',
+      [PayoutStatus.FAILED]: 'Failed',
+    };
+
+    return labels[status];
   }
 
   private getBookingDateTime(booking: AdminBookingPayment) {

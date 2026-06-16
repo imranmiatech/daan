@@ -6,6 +6,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { MailModule } from './modules/common/mail/mail.module';
+import { CloudinaryModule } from './modules/common/cloudinary/cloudinary.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { CourseModule } from './modules/course/course.module';
 import { ResourceModule } from './modules/resource/resource.module';
@@ -28,6 +29,7 @@ import { StudentLessonsModule } from './modules/student-lessons/student-lessons.
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     RedisModule,
+    CloudinaryModule,
     AuthModule,
     UsersModule,
     MailModule,

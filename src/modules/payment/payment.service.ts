@@ -3,6 +3,8 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
 import {
   PaymentStatus,
@@ -37,8 +39,10 @@ type TutorPrivateLessonsQuery = {
 };
 
 @Injectable()
-export class PaymentService {
+export class PaymentService implements OnModuleInit, OnModuleDestroy {
   private readonly stripe: Stripe.Stripe;
+  private payoutInterval?: NodeJS.Timeout;
+  private isProcessingPayouts = false;
 
   constructor(private readonly prisma: PrismaService) {
     const secretKey = process.env.STRIPE_SECRET_KEY;
@@ -48,6 +52,26 @@ export class PaymentService {
     }
 
     this.stripe = new Stripe(secretKey);
+  }
+
+  onModuleInit() {
+    const intervalMs = Number(
+      process.env.PAYOUT_PROCESSOR_INTERVAL_MS ?? 10 * 60 * 1000,
+    );
+
+    if (intervalMs > 0) {
+      this.payoutInterval = setInterval(() => {
+        this.processDuePayouts().catch((error) => {
+          console.error('Auto payout processor failed', error);
+        });
+      }, intervalMs);
+    }
+  }
+
+  onModuleDestroy() {
+    if (this.payoutInterval) {
+      clearInterval(this.payoutInterval);
+    }
   }
 
   async createCheckoutSession(userId: string, dto: CreateCheckoutSessionDto) {
@@ -638,7 +662,7 @@ export class PaymentService {
           status: PaymentStatus.PAID,
         },
         _sum: {
-          amount: true,
+          tutorAmount: true,
         },
       }),
       this.prisma.payment.aggregate({
@@ -651,17 +675,23 @@ export class PaymentService {
           },
         },
         _sum: {
-          amount: true,
+          tutorAmount: true,
         },
       }),
       this.prisma.payment.aggregate({
         where: {
           tutorId,
           status: PaymentStatus.PAID,
-          payoutStatus: PayoutStatus.PENDING,
+          payoutStatus: {
+            in: [
+              PayoutStatus.ON_HOLD,
+              PayoutStatus.PROCESSING,
+              PayoutStatus.FAILED,
+            ],
+          },
         },
         _sum: {
-          amount: true,
+          tutorAmount: true,
         },
       }),
       this.prisma.payment.count({
@@ -719,9 +749,9 @@ export class PaymentService {
     return {
       success: true,
       data: {
-        totalEarning: totalEarning._sum.amount ?? 0,
-        thisMonthEarning: thisMonthEarning._sum.amount ?? 0,
-        totalPendingPayout: totalPendingPayout._sum.amount ?? 0,
+        totalEarning: totalEarning._sum.tutorAmount ?? 0,
+        thisMonthEarning: thisMonthEarning._sum.tutorAmount ?? 0,
+        totalPendingPayout: totalPendingPayout._sum.tutorAmount ?? 0,
         paidStudentPercentage: {
           group: this.calculatePercentage(
             groupPaidPaymentsCount,
@@ -776,7 +806,7 @@ export class PaymentService {
           status: PaymentStatus.PAID,
         },
         _sum: {
-          amount: true,
+          tutorAmount: true,
         },
       }),
       this.prisma.payment.aggregate({
@@ -789,7 +819,7 @@ export class PaymentService {
           },
         },
         _sum: {
-          amount: true,
+          tutorAmount: true,
         },
       }),
       this.prisma.payment.aggregate({
@@ -802,17 +832,23 @@ export class PaymentService {
           },
         },
         _sum: {
-          amount: true,
+          tutorAmount: true,
         },
       }),
       this.prisma.payment.aggregate({
         where: {
           tutorId,
           status: PaymentStatus.PAID,
-          payoutStatus: PayoutStatus.PENDING,
+          payoutStatus: {
+            in: [
+              PayoutStatus.ON_HOLD,
+              PayoutStatus.PROCESSING,
+              PayoutStatus.FAILED,
+            ],
+          },
         },
         _sum: {
-          amount: true,
+          tutorAmount: true,
         },
       }),
       this.prisma.payment.count({
@@ -839,14 +875,14 @@ export class PaymentService {
           },
         },
         select: {
-          amount: true,
+          tutorAmount: true,
           createdAt: true,
         },
       }),
     ]);
 
-    const thisMonthAmount = thisMonthEarning._sum.amount ?? 0;
-    const previousMonthAmount = previousMonthEarning._sum.amount ?? 0;
+    const thisMonthAmount = thisMonthEarning._sum.tutorAmount ?? 0;
+    const previousMonthAmount = previousMonthEarning._sum.tutorAmount ?? 0;
     const totalPaidStudents = paidGroupStudents + paidPrivateStudents;
 
     return {
@@ -854,7 +890,7 @@ export class PaymentService {
       data: {
         cards: {
           totalEarning: {
-            amount: totalEarning._sum.amount ?? 0,
+            amount: totalEarning._sum.tutorAmount ?? 0,
             label: 'all time',
           },
           thisMonth: {
@@ -866,7 +902,7 @@ export class PaymentService {
             label: 'vs last month',
           },
           pendingPayout: {
-            amount: totalPendingPayout._sum.amount ?? 0,
+            amount: totalPendingPayout._sum.tutorAmount ?? 0,
             label: 'Processing',
           },
         },
@@ -1095,6 +1131,115 @@ export class PaymentService {
     };
   }
 
+  async createTutorConnectOnboarding(userId: string) {
+    const tutor = await this.prisma.user.findFirst({
+      where: {
+        id: userId,
+        role: Role.TUTOR,
+      },
+      include: {
+        paymentInfo: true,
+      },
+    });
+
+    if (!tutor) {
+      throw new NotFoundException('Tutor not found');
+    }
+
+    let stripeAccountId = tutor.paymentInfo?.stripeAccountId;
+
+    if (!stripeAccountId) {
+      const account = await this.stripe.accounts.create({
+        type: 'express',
+        email: tutor.email,
+        capabilities: {
+          transfers: { requested: true },
+        },
+        metadata: {
+          userId: tutor.id,
+        },
+      });
+
+      stripeAccountId = account.id;
+
+      await this.prisma.paymentInformation.upsert({
+        where: { userId: tutor.id },
+        update: {
+          paymentMethod: 'Stripe Connect',
+          legalName: tutor.fullName,
+          stripeAccountId,
+          payoutsEnabled: Boolean(account.payouts_enabled),
+          chargesEnabled: Boolean(account.charges_enabled),
+          verifiedAt: account.payouts_enabled ? new Date() : null,
+        },
+        create: {
+          userId: tutor.id,
+          paymentMethod: 'Stripe Connect',
+          legalName: tutor.fullName,
+          stripeAccountId,
+          payoutsEnabled: Boolean(account.payouts_enabled),
+          chargesEnabled: Boolean(account.charges_enabled),
+          verifiedAt: account.payouts_enabled ? new Date() : null,
+        },
+      });
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:5173';
+    const accountLink = await this.stripe.accountLinks.create({
+      account: stripeAccountId,
+      refresh_url: `${frontendUrl}/tutor/settings/payment?connect=refresh`,
+      return_url: `${frontendUrl}/tutor/settings/payment?connect=success`,
+      type: 'account_onboarding',
+    });
+
+    return {
+      success: true,
+      data: {
+        stripeAccountId,
+        url: accountLink.url,
+      },
+    };
+  }
+
+  async syncTutorConnectStatus(userId: string) {
+    const paymentInfo = await this.prisma.paymentInformation.findUnique({
+      where: { userId },
+    });
+
+    if (!paymentInfo?.stripeAccountId) {
+      throw new NotFoundException('Stripe Connect account not found');
+    }
+
+    const account = await this.stripe.accounts.retrieve(
+      paymentInfo.stripeAccountId,
+    );
+    const bankAccount = account.external_accounts?.data.find(
+      (externalAccount) => externalAccount.object === 'bank_account',
+    );
+
+    const updated = await this.prisma.paymentInformation.update({
+      where: { userId },
+      data: {
+        payoutsEnabled: Boolean(account.payouts_enabled),
+        chargesEnabled: Boolean(account.charges_enabled),
+        bankLast4:
+          bankAccount && 'last4' in bankAccount ? bankAccount.last4 : null,
+        verifiedAt: account.payouts_enabled ? new Date() : null,
+      },
+    });
+
+    return {
+      success: true,
+      data: {
+        stripeAccountId: updated.stripeAccountId,
+        payoutsEnabled: updated.payoutsEnabled,
+        chargesEnabled: updated.chargesEnabled,
+        bankLast4: updated.bankLast4,
+        verifiedAt: updated.verifiedAt,
+      },
+    };
+  }
+
   async findOne(userId: string, id: string) {
     const payment = await this.prisma.payment.findFirst({
       where: { id, userId },
@@ -1115,6 +1260,8 @@ export class PaymentService {
 
   private async handleCheckoutCompleted(session: any) {
     const paymentId = session.metadata?.paymentId;
+    const paidAt = new Date();
+    const { commissionRate, holdHours } = this.getPayoutConfig();
 
     const payment = await this.prisma.payment.findFirst({
       where: paymentId ? { id: paymentId } : { stripeSessionId: session.id },
@@ -1123,6 +1270,7 @@ export class PaymentService {
         courseId: true,
         userId: true,
         type: true,
+        amount: true,
       },
     });
 
@@ -1135,6 +1283,13 @@ export class PaymentService {
         where: { id: payment.id },
         data: {
           status: PaymentStatus.PAID,
+          payoutStatus: PayoutStatus.ON_HOLD,
+          paidAt,
+          holdUntil: this.addHours(paidAt, holdHours),
+          commissionRate,
+          commissionAmount: this.calculateCommission(payment.amount),
+          tutorAmount: this.calculateTutorAmount(payment.amount),
+          payoutFailureReason: null,
           stripePaymentIntentId:
             typeof session.payment_intent === 'string'
               ? session.payment_intent
@@ -1184,6 +1339,166 @@ export class PaymentService {
     });
   }
 
+  async processDuePayouts(limit = 25) {
+    if (this.isProcessingPayouts) {
+      return { success: true, processed: 0, skipped: true };
+    }
+
+    this.isProcessingPayouts = true;
+
+    try {
+      const now = new Date();
+      const duePayments = await this.prisma.payment.findMany({
+        where: {
+          status: PaymentStatus.PAID,
+          payoutStatus: {
+            in: [PayoutStatus.ON_HOLD, PayoutStatus.FAILED],
+          },
+          holdUntil: {
+            lte: now,
+          },
+        },
+        take: limit,
+        orderBy: {
+          holdUntil: 'asc',
+        },
+        include: {
+          tutor: {
+            select: {
+              id: true,
+              paymentInfo: {
+                select: {
+                  stripeAccountId: true,
+                  payoutsEnabled: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      let processed = 0;
+
+      for (const payment of duePayments) {
+        const claimedPayment = await this.prisma.payment.updateMany({
+          where: {
+            id: payment.id,
+            status: PaymentStatus.PAID,
+            payoutStatus: payment.payoutStatus,
+          },
+          data: {
+            payoutStatus: PayoutStatus.PROCESSING,
+            payoutFailureReason: null,
+          },
+        });
+
+        if (claimedPayment.count === 0) {
+          continue;
+        }
+
+        await this.releaseTutorPayout(payment);
+        processed += 1;
+      }
+
+      return { success: true, processed };
+    } finally {
+      this.isProcessingPayouts = false;
+    }
+  }
+
+  private async releaseTutorPayout(
+    payment: Prisma.PaymentGetPayload<{
+      include: {
+        tutor: {
+          select: {
+            id: true;
+            paymentInfo: {
+              select: {
+                stripeAccountId: true;
+                payoutsEnabled: true;
+              };
+            };
+          };
+        };
+      };
+    }>,
+  ) {
+    const stripeAccountId = payment.tutor.paymentInfo?.stripeAccountId;
+
+    if (!stripeAccountId || !payment.tutor.paymentInfo?.payoutsEnabled) {
+      await this.markPayoutFailed(
+        payment.id,
+        'Tutor Stripe Connect account is missing or payouts are not enabled',
+      );
+      return;
+    }
+
+    if (payment.tutorAmount <= 0) {
+      await this.markPayoutFailed(payment.id, 'Tutor payout amount is zero');
+      return;
+    }
+
+    try {
+      const transfer = await this.stripe.transfers.create({
+        amount: Math.round(payment.tutorAmount * 100),
+        currency: payment.currency,
+        destination: stripeAccountId,
+        metadata: {
+          paymentId: payment.id,
+          tutorId: payment.tutorId,
+          studentId: payment.userId,
+          commissionAmount: String(payment.commissionAmount),
+          tutorAmount: String(payment.tutorAmount),
+        },
+      });
+
+      await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: {
+          payoutStatus: PayoutStatus.PAID,
+          paidOutAt: new Date(),
+          payoutTransferId: transfer.id,
+          payoutFailureReason: null,
+        },
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Stripe transfer failed';
+      await this.markPayoutFailed(payment.id, message);
+    }
+  }
+
+  private async markPayoutFailed(paymentId: string, reason: string) {
+    await this.prisma.payment.update({
+      where: { id: paymentId },
+      data: {
+        payoutStatus: PayoutStatus.FAILED,
+        payoutFailureReason: reason,
+      },
+    });
+  }
+
+  private getPayoutConfig() {
+    return {
+      commissionRate: Number(process.env.PLATFORM_COMMISSION_RATE ?? 0.2),
+      holdHours: Number(process.env.PAYOUT_HOLD_HOURS ?? 48),
+    };
+  }
+
+  private calculateCommission(amount: number) {
+    const { commissionRate } = this.getPayoutConfig();
+
+    return Number((amount * commissionRate).toFixed(2));
+  }
+
+  private calculateTutorAmount(amount: number) {
+    return Number((amount - this.calculateCommission(amount)).toFixed(2));
+  }
+
+  private addHours(date: Date, hours: number) {
+    return new Date(date.getTime() + hours * 60 * 60 * 1000);
+  }
+
   private calculatePercentage(part: number, total: number) {
     if (total <= 0) {
       return 0;
@@ -1201,7 +1516,7 @@ export class PaymentService {
   }
 
   private buildMonthlyRevenueOverview(
-    payments: { amount: number; createdAt: Date }[],
+    payments: { amount?: number; tutorAmount?: number; createdAt: Date }[],
     now: Date,
   ) {
     const monthCount = now.getMonth() + 1;
@@ -1217,7 +1532,7 @@ export class PaymentService {
       const paymentMonth = payment.createdAt.getMonth();
 
       if (payment.createdAt.getFullYear() === now.getFullYear()) {
-        totals[paymentMonth].amount += payment.amount;
+        totals[paymentMonth].amount += payment.tutorAmount ?? payment.amount ?? 0;
       }
     }
 
@@ -1331,6 +1646,10 @@ export class PaymentService {
         sessionCount,
       },
       amount: payment.amount,
+      commissionAmount: payment.commissionAmount,
+      tutorAmount: payment.tutorAmount,
+      holdUntil: payment.holdUntil,
+      paidOutAt: payment.paidOutAt,
       currency: payment.currency,
       status,
       paymentStatus: this.formatPaymentStatus(payment.status),
@@ -1418,6 +1737,10 @@ export class PaymentService {
       courseId: payment.courseId,
       courseTitle: payment.course?.title ?? null,
       amount: payment.amount,
+      commissionAmount: payment.commissionAmount,
+      tutorAmount: payment.tutorAmount,
+      holdUntil: payment.holdUntil,
+      paidOutAt: payment.paidOutAt,
       type: this.formatPaymentType(payment.type),
       date: payment.createdAt,
       status: this.formatPaymentStatus(payment.status),
@@ -1473,6 +1796,10 @@ export class PaymentService {
           }
         : null,
       amount: payment.amount,
+      commissionAmount: payment.commissionAmount,
+      tutorAmount: payment.tutorAmount,
+      holdUntil: payment.holdUntil,
+      paidOutAt: payment.paidOutAt,
       type: this.formatPaymentType(payment.type),
       date: payment.createdAt,
       status: this.formatPaymentStatus(payment.status),

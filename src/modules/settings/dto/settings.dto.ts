@@ -51,6 +51,7 @@ export class CreatePaymentDto {
   @IsOptional()
   @IsString()
   routingNumber?: string;
+
 }
 
 export class UpdateSettingsDto {
@@ -97,6 +98,7 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsString()
   routingNumber?: string;
+
 }
 
 

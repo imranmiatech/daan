@@ -53,4 +53,44 @@ export class MailService {
       throw new InternalServerErrorException('Failed to send OTP email');
     }
   }
+
+  async sendSupportReply(input: {
+    to: string;
+    name: string;
+    ticketCode: string;
+    subject: string;
+    message: string;
+  }) {
+    try {
+      await this.transporter.sendMail({
+        from: this.getFromAddress(),
+        to: input.to,
+        subject: input.subject,
+        html: `
+          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937;">
+            <p>Hello ${this.escapeHtml(input.name)},</p>
+            <p>${this.escapeHtml(input.message).replace(/\n/g, '<br>')}</p>
+            <p style="margin-top: 24px; color: #6b7280;">
+              Ticket: ${this.escapeHtml(input.ticketCode)}
+            </p>
+          </div>
+        `,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to send support reply to ${input.to}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new InternalServerErrorException('Failed to send support reply');
+    }
+  }
+
+  private escapeHtml(value: string) {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
 }

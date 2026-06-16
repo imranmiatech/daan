@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { ApplicationStatus, DayOfWeek } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
 import {
   AvailabilityDto,
   CreateProfileDto,
@@ -13,9 +14,16 @@ import {
 
 @Injectable()
 export class ProfileService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {}
 
-  async createProfile(userId: string, dto: CreateProfileDto) {
+  async createProfile(
+    userId: string,
+    dto: CreateProfileDto,
+    files?: { avatarFile?: any; videoFile?: any },
+  ) {
     const {
       fullName,
       country,
@@ -35,6 +43,9 @@ export class ProfileService {
     } = dto;
 
     const availabilityData = this.mapAvailability(availability);
+    const uploadedFiles = await this.uploadProfileFiles(files);
+    const finalAvatarUrl = uploadedFiles.avatarUrl ?? avatarUrl;
+    const finalVideoUrl = uploadedFiles.videoUrl ?? videoUrl;
 
     const profile = await this.prisma.$transaction(async (tx) => {
       const existingProfile = await tx.userProfile.findUnique({
@@ -83,7 +94,7 @@ export class ProfileService {
           data: {
             country,
             city,
-            avatarUrl,
+            avatarUrl: finalAvatarUrl,
             bio,
             yearOfExperience,
             pricePerHour,
@@ -92,7 +103,7 @@ export class ProfileService {
             teachingCategory,
             teachingSkills,
             sessionDuration,
-            videoUrl,
+            videoUrl: finalVideoUrl,
           },
           include: this.profileInclude(),
         });
@@ -103,7 +114,7 @@ export class ProfileService {
           userId,
           country,
           city,
-          avatarUrl,
+          avatarUrl: finalAvatarUrl,
           bio,
           yearOfExperience,
           pricePerHour,
@@ -112,7 +123,7 @@ export class ProfileService {
           teachingCategory,
           teachingSkills,
           sessionDuration,
-          videoUrl,
+          videoUrl: finalVideoUrl,
           education:
             education && education.length > 0
               ? {
@@ -172,7 +183,11 @@ export class ProfileService {
     };
   }
 
-  async updateProfile(userId: string, dto: UpdateProfileDto) {
+  async updateProfile(
+    userId: string,
+    dto: UpdateProfileDto,
+    files?: { avatarFile?: any; videoFile?: any },
+  ) {
     const {
       fullName,
       country,
@@ -240,12 +255,14 @@ export class ProfileService {
       }
     }
 
+    const uploadedFiles = await this.uploadProfileFiles(files);
+
     return this.prisma.userProfile.update({
       where: { userId },
       data: {
         country,
         city,
-        avatarUrl,
+        avatarUrl: uploadedFiles.avatarUrl ?? avatarUrl,
         bio,
         yearOfExperience,
         pricePerHour,
@@ -254,10 +271,46 @@ export class ProfileService {
         teachingCategory,
         teachingSkills,
         sessionDuration,
-        videoUrl,
+        videoUrl: uploadedFiles.videoUrl ?? videoUrl,
       },
       include: this.profileInclude(),
     });
+  }
+
+  private async uploadProfileFiles(files?: { avatarFile?: any; videoFile?: any }) {
+    const [avatarUpload, videoUpload] = await Promise.all([
+      files?.avatarFile
+        ? this.cloudinaryService.uploadFile(files.avatarFile, {
+            folder: 'daanklerk/profiles',
+            resourceType: 'image',
+            allowedMimeTypes: [
+              'image/jpeg',
+              'image/png',
+              'image/webp',
+              'image/gif',
+            ],
+            maxBytes: 5 * 1024 * 1024,
+          })
+        : Promise.resolve(null),
+      files?.videoFile
+        ? this.cloudinaryService.uploadFile(files.videoFile, {
+            folder: 'daanklerk/profile-videos',
+            resourceType: 'video',
+            allowedMimeTypes: [
+              'video/mp4',
+              'video/webm',
+              'video/quicktime',
+              'video/x-msvideo',
+            ],
+            maxBytes: 50 * 1024 * 1024,
+          })
+        : Promise.resolve(null),
+    ]);
+
+    return {
+      avatarUrl: avatarUpload?.url,
+      videoUrl: videoUpload?.url,
+    };
   }
 
   async updateApplicationStatus(profileId: string, status: ApplicationStatus) {

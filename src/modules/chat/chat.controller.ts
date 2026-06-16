@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
+  ApiBody,
   ApiBearerAuth,
   ApiOperation,
   ApiParam,
@@ -133,6 +134,34 @@ export class ChatController {
       'Send a message using HTTP. The message is also broadcasted to WebSocket clients in the conversation room.',
   })
   @ApiParam({ name: 'conversationId', description: 'Conversation UUID' })
+  @ApiBody({
+    type: SendMessageDto,
+    examples: {
+      text: {
+        summary: 'Text message',
+        value: {
+          content: 'Hello everyone',
+          messageType: 'TEXT',
+        },
+      },
+      image: {
+        summary: 'Image message',
+        value: {
+          content: 'Class screenshot',
+          messageType: 'IMAGE',
+          fileUrl: 'https://storage.example.com/images/class.png',
+        },
+      },
+      pdf: {
+        summary: 'PDF or file message',
+        value: {
+          content: 'Today lesson PDF',
+          messageType: 'FILE',
+          fileUrl: 'https://storage.example.com/files/lesson.pdf',
+        },
+      },
+    },
+  })
   @ApiResponse({
     status: 201,
     description: 'Message sent.',

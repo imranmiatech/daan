@@ -21,6 +21,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { AdminDashboardService } from './admindashboard.service';
 import { AdminBookingManagementQueryDto } from './dto/admin-booking-management-query.dto';
 import { AdminPaymentOverviewQueryDto } from './dto/admin-payment-overview-query.dto';
+import { AdminPayoutManagementQueryDto } from './dto/admin-payout-management-query.dto';
 import { TutorStatusQueryDto } from './dto/tutor-status-query.dto';
 import { UpdateTutorApplicationStatusDto } from './dto/update-tutor-application-status.dto';
 
@@ -234,6 +235,77 @@ export class AdminDashboardController {
   })
   getPaymentOverview(@Query() query: AdminPaymentOverviewQueryDto) {
     return this.adminDashboardService.getPaymentOverview(query);
+  }
+
+  @Get('payout-management')
+  @ApiOperation({
+    summary: 'Get admin payout management table',
+    description:
+      'Admin payout page API. Returns teacher payouts with pagination for the Payout Management table.',
+  })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 10 })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    example: 'Albert',
+    description: 'Search by teacher name, teacher email, or payment id.',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['all', 'PENDING', 'ON_HOLD', 'PROCESSING', 'PAID', 'FAILED'],
+    example: 'PAID',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Admin payout management table retrieved.',
+    schema: {
+      example: {
+        success: true,
+        data: {
+          title: 'Payout Management',
+          subtitle: 'Manage teacher payouts and payment processing.',
+          payouts: [
+            {
+              payoutId: 'payment_01',
+              teacher: {
+                id: 'tutor_albert_flores',
+                name: 'Albert Flores',
+                email: 'georgia.young@example.com',
+              },
+              amount: 80,
+              amountLabel: '$80',
+              grossAmount: 100,
+              commissionAmount: 20,
+              method: 'Bank Transfer',
+              date: '2026-05-20T10:41:00.000Z',
+              dateLabel: 'May 20, 2026',
+              status: 'PAID',
+              statusLabel: 'Paid',
+            },
+          ],
+          filters: {
+            search: null,
+            status: 'PAID',
+          },
+          meta: {
+            page: 1,
+            limit: 10,
+            total: 35,
+            totalPages: 4,
+            from: 1,
+            to: 10,
+            hasPreviousPage: false,
+            hasNextPage: true,
+            showingLabel: 'Showing 1 to 10 of 35 users',
+          },
+        },
+      },
+    },
+  })
+  getPayoutManagement(@Query() query: AdminPayoutManagementQueryDto) {
+    return this.adminDashboardService.getPayoutManagement(query);
   }
 
   @Get('booking-management')

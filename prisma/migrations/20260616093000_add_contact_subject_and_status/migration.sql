@@ -1,0 +1,10 @@
+ALTER TABLE "Contact"
+ADD COLUMN IF NOT EXISTS "subject" TEXT NOT NULL DEFAULT 'General Support';
+
+ALTER TABLE "Contact"
+ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'OPEN';
+
+ALTER TABLE "Contact"
+ALTER COLUMN "subject" DROP DEFAULT;
+
+CREATE INDEX IF NOT EXISTS "Contact_status_idx" ON "Contact"("status");

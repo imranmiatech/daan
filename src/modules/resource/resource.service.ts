@@ -1,28 +1,66 @@
-import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
 import { CreateResourceDto, UpdateResourceDto } from './dto/resource.dto';
 
 @Injectable()
 export class ResourceService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {}
 
-  async createResource(tutorId: string, dto: CreateResourceDto) {
+  async createResource(tutorId: string, dto: CreateResourceDto, file?: any) {
+    if (dto.courseId) {
+      const course = await this.prisma.course.findUnique({
+        where: { id: dto.courseId },
+        select: { tutorId: true },
+      });
+
+      if (!course) {
+        throw new NotFoundException('Course not found');
+      }
+
+      if (course.tutorId !== tutorId) {
+        throw new UnauthorizedException('You cannot add resources to this course');
+      }
+    }
+
+    const upload = file ? await this.uploadResourceFile(file) : null;
+    const url = upload?.url ?? dto.url;
+
+    if (!url) {
+      throw new BadRequestException('Provide either url or file');
+    }
+
     const resource = await this.prisma.resource.create({
       data: {
         tutorId,
+        courseId: dto.courseId,
         name: dto.name,
-        url: dto.url,
+        url,
+        size: upload ? this.formatBytes(upload.bytes) : undefined,
       },
     });
 
     return {
       success: true,
       message: 'Resource created successfully',
-      data: resource,
+      data: upload ? { ...resource, upload } : resource,
     };
   }
 
-  async updateResource(resourceId: string, tutorId: string, dto: UpdateResourceDto) {
+  async updateResource(
+    resourceId: string,
+    tutorId: string,
+    dto: UpdateResourceDto,
+    file?: any,
+  ) {
     const resource = await this.prisma.resource.findUnique({
       where: { id: resourceId },
     });
@@ -35,18 +73,24 @@ export class ResourceService {
       throw new UnauthorizedException('You cannot update this resource');
     }
 
+    const upload = file ? await this.uploadResourceFile(file) : null;
+
     const updated = await this.prisma.resource.update({
       where: { id: resourceId },
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.url !== undefined && { url: dto.url }),
+        ...(upload && {
+          url: upload.url,
+          size: this.formatBytes(upload.bytes),
+        }),
       },
     });
 
     return {
       success: true,
       message: 'Resource updated successfully',
-      data: updated,
+      data: upload ? { ...updated, upload } : updated,
     };
   }
 
@@ -82,5 +126,33 @@ export class ResourceService {
       success: true,
       data: resources,
     };
+  }
+
+  private formatBytes(bytes: number) {
+    if (bytes < 1024) {
+      return `${bytes} B`;
+    }
+
+    if (bytes < 1024 * 1024) {
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    }
+
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  private uploadResourceFile(file: any) {
+    return this.cloudinaryService.uploadFile(file, {
+      folder: 'daanklerk/resources',
+      resourceType: 'raw',
+      allowedMimeTypes: [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'text/plain',
+      ],
+      maxBytes: 20 * 1024 * 1024,
+    });
   }
 }

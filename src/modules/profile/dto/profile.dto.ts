@@ -1,4 +1,4 @@
-import {
+import { 
   IsOptional,
   IsString,
   IsArray,

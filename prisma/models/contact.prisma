@@ -3,9 +3,12 @@ model Contact {
   name      String
   email     String
   phone     String
+  subject   String
   message   String
+  status    String   @default("OPEN")
   createdAt DateTime @default(now())
 
   @@index([email])
   @@index([createdAt])
+  @@index([status])
 }

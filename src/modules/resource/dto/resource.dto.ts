@@ -13,9 +13,17 @@ export class CreateResourceDto {
    * Resource URL.
    * @example "https://example.com/resource.pdf"
    */
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  url: string;
+  url?: string;
+
+  /**
+   * Optional course id for course-specific resources.
+   * @example "course_uuid"
+   */
+  @IsOptional()
+  @IsString()
+  courseId?: string;
 }
 
 export class UpdateResourceDto {

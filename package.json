@@ -26,7 +26,8 @@
     "prisma:build": "prisma validate",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
-    "seed:student-lessons": "node scripts/seed-student-lessons.js"
+    "seed:student-lessons": "node scripts/seed-student-lessons.js",
+    "seed:admin-dashboard": "node scripts/seed-admin-dashboard.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

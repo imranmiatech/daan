@@ -2,12 +2,28 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   ApplicationStatus,
   PaymentStatus,
+  PaymentType,
   PayoutStatus,
   Prisma,
   Role,
 } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { AdminBookingManagementQueryDto } from './dto/admin-booking-management-query.dto';
+import { AdminPaymentOverviewQueryDto } from './dto/admin-payment-overview-query.dto';
 import { TutorStatusFilter } from './dto/tutor-status-query.dto';
+
+type AdminBookingPayment = Prisma.PaymentGetPayload<{
+  include: {
+    course: {
+      select: {
+        startDate: true;
+        time: true;
+        timeZone: true;
+        classDuration: true;
+      };
+    };
+  };
+}>;
 
 @Injectable()
 export class AdminDashboardService {
@@ -259,6 +275,282 @@ export class AdminDashboardService {
     return {
       success: true,
       data: await this.buildUserJoining(),
+    };
+  }
+
+  async getPaymentOverview(query: AdminPaymentOverviewQueryDto) {
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(Math.max(1, query.limit ?? 10), 100);
+    const skip = (page - 1) * limit;
+    const search = query.search?.trim();
+    const type = query.type ?? 'all';
+    const status = query.status ?? 'all';
+
+    const where: Prisma.PaymentWhereInput = {
+      ...(type !== 'all' && { type }),
+      ...(status !== 'all' && { status }),
+      ...(search && {
+        OR: [
+          { id: { contains: search, mode: 'insensitive' } },
+          {
+            tutor: {
+              fullName: { contains: search, mode: 'insensitive' },
+            },
+          },
+          {
+            tutor: {
+              email: { contains: search, mode: 'insensitive' },
+            },
+          },
+          {
+            user: {
+              fullName: { contains: search, mode: 'insensitive' },
+            },
+          },
+          {
+            user: {
+              email: { contains: search, mode: 'insensitive' },
+            },
+          },
+          {
+            course: {
+              title: { contains: search, mode: 'insensitive' },
+            },
+          },
+        ],
+      }),
+    };
+
+    const [
+      summary,
+      total,
+      payments,
+      filteredTotalRevenue,
+      filteredCommissionRevenue,
+    ] = await Promise.all([
+      this.buildPaymentOverviewSummary(),
+      this.prisma.payment.count({ where }),
+      this.prisma.payment.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: {
+          createdAt: 'desc',
+        },
+        include: {
+          tutor: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+            },
+          },
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+            },
+          },
+          course: {
+            select: {
+              id: true,
+              title: true,
+            },
+          },
+        },
+      }),
+      this.prisma.payment.aggregate({
+        where,
+        _sum: {
+          amount: true,
+        },
+      }),
+      this.prisma.payment.aggregate({
+        where: {
+          ...where,
+          status: PaymentStatus.PAID,
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+    ]);
+
+    return {
+      success: true,
+      data: {
+        title: 'Payment Overview',
+        subtitle: 'Track all platform payments and transactions.',
+        summary,
+        transactions: payments.map((payment) => ({
+          transactionId: payment.id,
+          transactionCode: this.formatTransactionCode(payment.id),
+          teacher: {
+            id: payment.tutor.id,
+            name: payment.tutor.fullName,
+            email: payment.tutor.email,
+          },
+          student: {
+            id: payment.user.id,
+            name: payment.user.fullName,
+            email: payment.user.email,
+          },
+          course: payment.course
+            ? {
+                id: payment.course.id,
+                title: payment.course.title,
+              }
+            : null,
+          amount: payment.amount,
+          amountLabel: this.formatCurrency(payment.amount),
+          currency: payment.currency,
+          type: payment.type,
+          typeLabel: this.formatPaymentType(payment.type),
+          date: payment.createdAt,
+          dateLabel: this.formatFullDate(payment.createdAt),
+          status: payment.status,
+          statusLabel: this.formatPaymentStatus(payment.status),
+          payoutStatus: payment.payoutStatus,
+          payoutStatusLabel: this.formatPayoutStatus(payment.payoutStatus),
+        })),
+        filteredSummary: {
+          totalRevenue: filteredTotalRevenue._sum.amount ?? 0,
+          commissionRevenue: this.calculateCommission(
+            filteredCommissionRevenue._sum.amount ?? 0,
+          ),
+        },
+        filters: {
+          search: search ?? null,
+          type,
+          status,
+        },
+        meta: this.buildPaginationMeta(page, limit, total, payments.length),
+      },
+    };
+  }
+
+  async getBookingManagement(query: AdminBookingManagementQueryDto) {
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(Math.max(1, query.limit ?? 10), 100);
+    const skip = (page - 1) * limit;
+    const search = query.search?.trim();
+    const type = query.type ?? 'all';
+    const status = query.status ?? 'all';
+
+    const where: Prisma.PaymentWhereInput = {
+      ...(type !== 'all' && { type }),
+      ...(status !== 'all' && { status }),
+      ...(search && {
+        OR: [
+          {
+            tutor: {
+              fullName: { contains: search, mode: 'insensitive' },
+            },
+          },
+          {
+            tutor: {
+              email: { contains: search, mode: 'insensitive' },
+            },
+          },
+          {
+            user: {
+              fullName: { contains: search, mode: 'insensitive' },
+            },
+          },
+          {
+            user: {
+              email: { contains: search, mode: 'insensitive' },
+            },
+          },
+          {
+            course: {
+              title: { contains: search, mode: 'insensitive' },
+            },
+          },
+        ],
+      }),
+    };
+
+    const [total, bookings] = await Promise.all([
+      this.prisma.payment.count({ where }),
+      this.prisma.payment.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: {
+          createdAt: 'desc',
+        },
+        include: {
+          tutor: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+            },
+          },
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+            },
+          },
+          course: {
+            select: {
+              id: true,
+              title: true,
+              startDate: true,
+              time: true,
+              timeZone: true,
+              classDuration: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      success: true,
+      data: {
+        title: 'Booking Management',
+        subtitle: 'View and manage all platform bookings and sessions.',
+        bookings: bookings.map((booking) => ({
+          bookingId: booking.id,
+          bookingCode:
+            booking.course?.title ??
+            `${this.formatPaymentType(booking.type)} Session`,
+          course: booking.course
+            ? {
+                id: booking.course.id,
+                title: booking.course.title,
+              }
+            : null,
+          teacher: {
+            id: booking.tutor.id,
+            name: booking.tutor.fullName,
+            email: booking.tutor.email,
+          },
+          student: {
+            id: booking.user.id,
+            name: booking.user.fullName,
+            email: booking.user.email,
+          },
+          type: booking.type,
+          typeLabel: this.formatPaymentType(booking.type),
+          dateTime: this.getBookingDateTime(booking),
+          status: booking.status,
+          statusLabel: this.formatBookingStatus(booking.status),
+          amount: booking.amount,
+          amountLabel: this.formatCurrency(booking.amount),
+        })),
+        filters: {
+          search: search ?? null,
+          type,
+          status,
+        },
+        meta: this.buildPaginationMeta(page, limit, total, bookings.length),
+      },
     };
   }
 
@@ -581,5 +873,183 @@ export class AdminDashboardService {
     }
 
     return Number((((current - previous) / previous) * 100).toFixed(2));
+  }
+
+  private async buildPaymentOverviewSummary() {
+    const [
+      totalRevenue,
+      paidRevenue,
+      pendingPayments,
+      completedPayouts,
+    ] = await Promise.all([
+      this.prisma.payment.aggregate({
+        where: {
+          status: PaymentStatus.PAID,
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+      this.prisma.payment.aggregate({
+        where: {
+          status: PaymentStatus.PAID,
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+      this.prisma.payment.aggregate({
+        where: {
+          status: PaymentStatus.PENDING,
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+      this.prisma.payment.aggregate({
+        where: {
+          status: PaymentStatus.PAID,
+          payoutStatus: PayoutStatus.PAID,
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+    ]);
+
+    const totalRevenueAmount = totalRevenue._sum.amount ?? 0;
+    const commissionRevenue = this.calculateCommission(
+      paidRevenue._sum.amount ?? 0,
+    );
+    const pendingPaymentsAmount = pendingPayments._sum.amount ?? 0;
+    const completedPayoutsAmount = completedPayouts._sum.amount ?? 0;
+
+    return {
+      totalRevenue: {
+        amount: totalRevenueAmount,
+        amountLabel: this.formatCurrency(totalRevenueAmount),
+      },
+      commissionRevenue: {
+        amount: commissionRevenue,
+        amountLabel: this.formatCurrency(commissionRevenue),
+      },
+      pendingPayments: {
+        amount: pendingPaymentsAmount,
+        amountLabel: this.formatCurrency(pendingPaymentsAmount),
+      },
+      completedPayouts: {
+        amount: completedPayoutsAmount,
+        amountLabel: this.formatCurrency(completedPayoutsAmount),
+      },
+    };
+  }
+
+  private buildPaginationMeta(
+    page: number,
+    limit: number,
+    total: number,
+    rowCount: number,
+  ) {
+    const skip = (page - 1) * limit;
+    const totalPages = Math.ceil(total / limit);
+    const from = total === 0 ? 0 : skip + 1;
+    const to = Math.min(skip + rowCount, total);
+
+    return {
+      page,
+      limit,
+      total,
+      totalPages,
+      from,
+      to,
+      hasPreviousPage: page > 1,
+      hasNextPage: page < totalPages,
+      showingLabel: `Showing ${from} to ${to} of ${total} users`,
+    };
+  }
+
+  private calculateCommission(amount: number) {
+    const commissionRate = Number(process.env.PLATFORM_COMMISSION_RATE ?? 0.2);
+
+    return Number((amount * commissionRate).toFixed(2));
+  }
+
+  private formatCurrency(amount: number, currency = 'USD') {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  }
+
+  private formatFullDate(date: Date) {
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  }
+
+  private formatTransactionCode(id: string) {
+    return `TXN${id.replace(/-/g, '').slice(0, 7).toUpperCase()}`;
+  }
+
+  private formatPaymentType(type: PaymentType) {
+    return type === PaymentType.GROUP ? 'Group' : 'Private';
+  }
+
+  private formatPaymentStatus(status: PaymentStatus) {
+    const labels: Record<PaymentStatus, string> = {
+      [PaymentStatus.PENDING]: 'Pending',
+      [PaymentStatus.PAID]: 'Paid',
+      [PaymentStatus.FAILED]: 'Failed',
+      [PaymentStatus.CANCELLED]: 'Cancelled',
+    };
+
+    return labels[status];
+  }
+
+  private formatBookingStatus(status: PaymentStatus) {
+    if (status === PaymentStatus.PAID) {
+      return 'Active';
+    }
+
+    return this.formatPaymentStatus(status);
+  }
+
+  private formatPayoutStatus(status: PayoutStatus) {
+    return status === PayoutStatus.PAID ? 'Paid' : 'Pending';
+  }
+
+  private getBookingDateTime(booking: AdminBookingPayment) {
+    const date = booking.course?.startDate ?? booking.createdAt;
+    const time = booking.course?.time ?? null;
+
+    return {
+      date,
+      dateLabel: this.formatFullDate(date),
+      time,
+      timeLabel: time ? this.formatTimeLabel(time) : null,
+      timeZone: booking.course?.timeZone ?? null,
+      durationMinutes: booking.course?.classDuration ?? null,
+    };
+  }
+
+  private formatTimeLabel(time: string) {
+    const [hourPart, minutePart = '0'] = time.split(':');
+    const hour = Number(hourPart);
+    const minute = Number(minutePart);
+
+    if (Number.isNaN(hour) || Number.isNaN(minute)) {
+      return time;
+    }
+
+    const date = new Date();
+    date.setHours(hour, minute, 0, 0);
+
+    return date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+    });
   }
 }

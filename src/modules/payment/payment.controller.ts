@@ -10,8 +10,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
+  ApiBody,
   ApiBearerAuth,
   ApiOperation,
+  ApiParam,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -32,10 +35,73 @@ export class PaymentController {
   @Roles(Role.STUDENT)
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Create Stripe Checkout session for group course or private tutor',
+    summary: 'Create Stripe Checkout session for group class or private tutor',
+    description:
+      'Unified payment API. Send courseId for group class enrollment payment, or send tutorId for a private 1-on-1 tutor booking. Never send both in the same request.',
   })
-  @ApiResponse({ status: 201, description: 'Checkout session created.' })
-  @ApiResponse({ status: 400, description: 'Invalid payment request.' })
+  @ApiBody({
+    type: CreateCheckoutSessionDto,
+    examples: {
+      groupClassPayment: {
+        summary: 'Group class payment',
+        description:
+          'Use this when a student enrolls in a tutor-created course/group class.',
+        value: {
+          courseId: 'course_advanced_math_101',
+        },
+      },
+      privateSessionPayment: {
+        summary: 'Private session payment',
+        description:
+          'Use this when a student books a tutor individually from the tutor list.',
+        value: {
+          tutorId: 'tutor_albert_flores',
+          sessionCount: 2,
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Checkout session created.',
+    schema: {
+      example: {
+        success: true,
+        message: 'Checkout session created successfully',
+        data: {
+          payment: {
+            id: 'payment_01',
+            userId: 'student_jacob_jones',
+            tutorId: 'tutor_albert_flores',
+            courseId: 'course_advanced_math_101',
+            amount: 94,
+            currency: 'usd',
+            status: 'PENDING',
+            type: 'GROUP',
+            payoutStatus: 'PENDING',
+            stripeSessionId: 'cs_test_123',
+            createdAt: '2026-06-15T10:00:00.000Z',
+            updatedAt: '2026-06-15T10:00:00.000Z',
+          },
+          sessionId: 'cs_test_123',
+          url: 'https://checkout.stripe.com/c/pay/cs_test_123',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Invalid request, for example both courseId and tutorId were sent together.',
+    schema: {
+      example: {
+        message:
+          'Provide either courseId for group course payment or tutorId for private tutor payment',
+        error: 'Bad Request',
+        statusCode: 400,
+      },
+    },
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized.' })
   createCheckoutSession(
     @CurrentUser() user: { userId: string },
@@ -45,7 +111,20 @@ export class PaymentController {
   }
 
   @Post('webhook')
-  @ApiOperation({ summary: 'Stripe webhook endpoint' })
+  @ApiOperation({
+    summary: 'Stripe webhook endpoint',
+    description:
+      'Stripe calls this endpoint after checkout completion, expiry, or failed async payment. Frontend developers do not call this directly.',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Webhook received.',
+    schema: {
+      example: {
+        received: true,
+      },
+    },
+  })
   handleWebhook(
     @Req() req: any,
     @Headers('stripe-signature') signature?: string,
@@ -56,7 +135,48 @@ export class PaymentController {
   @Get('my')
   @UseGuards(AuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get logged-in user payments' })
+  @ApiOperation({
+    summary: 'Get logged-in user payments',
+    description:
+      'Returns all payments for the logged-in user. Students see their purchases; tutors/admins should use dashboard-specific APIs where possible.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Payments retrieved.',
+    schema: {
+      example: {
+        success: true,
+        data: [
+          {
+            id: 'payment_01',
+            userId: 'student_jacob_jones',
+            tutorId: 'tutor_albert_flores',
+            courseId: 'course_advanced_math_101',
+            amount: 94,
+            currency: 'usd',
+            status: 'PAID',
+            type: 'GROUP',
+            payoutStatus: 'PENDING',
+            tutor: {
+              id: 'tutor_albert_flores',
+              fullName: 'Albert Flores',
+              email: 'albert.flores@example.com',
+              profile: {
+                avatarUrl: 'https://example.com/avatars/albert.png',
+              },
+            },
+            course: {
+              id: 'course_advanced_math_101',
+              title: 'Advanced Mathematics',
+              image: 'https://example.com/courses/math.png',
+              startDate: '2026-06-20T00:00:00.000Z',
+              pricePerStudent: 94,
+            },
+          },
+        ],
+      },
+    },
+  })
   findMyPayments(@Req() req: any) {
     return this.paymentService.findMyPayments(req.user.userId);
   }
@@ -66,6 +186,31 @@ export class PaymentController {
   @Roles(Role.STUDENT)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get student billing dashboard metadata' })
+  @ApiResponse({
+    status: 200,
+    description: 'Student billing cards retrieved.',
+    schema: {
+      example: {
+        success: true,
+        data: {
+          cards: {
+            totalSpent: {
+              amount: 328,
+              paymentCount: 4,
+            },
+            totalCourses: {
+              count: 3,
+              enrolledThisMonth: 1,
+            },
+            thisMonth: {
+              amount: 94,
+              paymentCount: 1,
+            },
+          },
+        },
+      },
+    },
+  })
   findStudentDashboardMeta(@CurrentUser() user: { userId: string }) {
     return this.paymentService.findStudentDashboardMeta(user.userId);
   }
@@ -75,6 +220,66 @@ export class PaymentController {
   @Roles(Role.STUDENT)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get student billing payment history table' })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 10 })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['PENDING', 'PAID', 'FAILED', 'CANCELLED'],
+    example: 'PAID',
+  })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    enum: ['GROUP', 'PRIVATE'],
+    example: 'GROUP',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Student payment history retrieved.',
+    schema: {
+      example: {
+        success: true,
+        data: [
+          {
+            invoice: 'INV-2026-PAYMENT_',
+            transactionId: 'payment_01',
+            paymentMethod: {
+              label: 'Stripe',
+              provider: 'stripe',
+              brand: null,
+              last4: null,
+            },
+            teacher: {
+              id: 'tutor_albert_flores',
+              name: 'Albert Flores',
+              email: 'albert.flores@example.com',
+              image: 'https://example.com/avatars/albert.png',
+            },
+            course: {
+              id: 'course_advanced_math_101',
+              title: 'Advanced Mathematics',
+              image: 'https://example.com/courses/math.png',
+            },
+            amount: 94,
+            type: 'group',
+            date: '2026-06-15T10:00:00.000Z',
+            status: 'paid',
+          },
+        ],
+        meta: {
+          page: 1,
+          limit: 10,
+          total: 35,
+          totalPages: 4,
+          from: 1,
+          to: 10,
+          hasPreviousPage: false,
+          hasNextPage: true,
+        },
+      },
+    },
+  })
   findStudentDashboardTransactions(
     @CurrentUser() user: { userId: string },
     @Query('page') page?: string,
@@ -95,6 +300,43 @@ export class PaymentController {
   @Roles(Role.TUTOR)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get tutor earnings dashboard metadata' })
+  @ApiResponse({
+    status: 200,
+    description: 'Tutor earnings dashboard metadata retrieved.',
+    schema: {
+      example: {
+        success: true,
+        data: {
+          cards: {
+            totalEarning: {
+              amount: 262800,
+              label: 'all time',
+            },
+            thisMonth: {
+              amount: 8500,
+              changePercentage: 12.5,
+              label: 'vs last month',
+            },
+            pendingPayout: {
+              amount: 8450,
+              label: 'Processing',
+            },
+          },
+          paidStudent: {
+            total: 24,
+            group: {
+              count: 18,
+              percentage: 75,
+            },
+            private: {
+              count: 6,
+              percentage: 25,
+            },
+          },
+        },
+      },
+    },
+  })
   findTutorDashboardMeta(@CurrentUser() user: { userId: string }) {
     return this.paymentService.findTutorDashboardMeta(user.userId);
   }
@@ -104,6 +346,54 @@ export class PaymentController {
   @Roles(Role.TUTOR)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get tutor earnings dashboard transactions table' })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 10 })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['PENDING', 'PAID', 'FAILED', 'CANCELLED'],
+    example: 'PAID',
+  })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    enum: ['GROUP', 'PRIVATE'],
+    example: 'PRIVATE',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Tutor transaction table retrieved.',
+    schema: {
+      example: {
+        success: true,
+        data: [
+          {
+            transactionId: 'payment_02',
+            studentId: 'student_robert_fox',
+            studentName: 'Robert Fox',
+            studentEmail: 'robert.fox@example.com',
+            courseId: null,
+            courseTitle: null,
+            amount: 120,
+            type: 'private',
+            date: '2026-06-15T11:00:00.000Z',
+            status: 'paid',
+            payoutStatus: 'pending',
+          },
+        ],
+        meta: {
+          page: 1,
+          limit: 10,
+          total: 12,
+          totalPages: 2,
+          from: 1,
+          to: 10,
+          hasPreviousPage: false,
+          hasNextPage: true,
+        },
+      },
+    },
+  })
   findTutorDashboardTransactions(
     @CurrentUser() user: { userId: string },
     @Query('page') page?: string,
@@ -123,7 +413,78 @@ export class PaymentController {
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(Role.TUTOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get tutor private 1-on-1 lesson bookings' })
+  @ApiOperation({
+    summary: 'Get tutor private 1-on-1 lesson bookings',
+    description:
+      'Tutor-side private session list. This is only for private bookings created through the unified checkout API with tutorId.',
+  })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 10 })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['upcoming', 'live', 'completed', 'cancelled'],
+    example: 'upcoming',
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    example: 'Jacob',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Tutor private lesson bookings retrieved.',
+    schema: {
+      example: {
+        success: true,
+        data: [
+          {
+            id: 'payment_private_01',
+            paymentId: 'payment_private_01',
+            student: {
+              id: 'student_jacob_jones',
+              name: 'Jacob Jones',
+              email: 'jacob.jones@example.com',
+              image: null,
+            },
+            dateTime: {
+              startsAt: '2026-06-15T10:00:00.000Z',
+              endsAt: '2026-06-15T11:00:00.000Z',
+              date: '2026-06-15T10:00:00.000Z',
+              time: '2026-06-15T10:00:00.000Z',
+            },
+            duration: {
+              minutes: 60,
+              label: '1 hr',
+              sessionCount: 1,
+            },
+            amount: 120,
+            currency: 'usd',
+            status: 'upcoming',
+            paymentStatus: 'paid',
+            payoutStatus: 'pending',
+            canJoin: false,
+            createdAt: '2026-06-15T10:00:00.000Z',
+            updatedAt: '2026-06-15T10:00:00.000Z',
+          },
+        ],
+        meta: {
+          page: 1,
+          limit: 10,
+          total: 1,
+          totalPages: 1,
+          from: 1,
+          to: 1,
+          hasPreviousPage: false,
+          hasNextPage: false,
+          filters: {
+            status: 'upcoming',
+            search: 'Jacob',
+          },
+        },
+      },
+    },
+  })
   findTutorPrivateLessons(
     @CurrentUser() user: { userId: string },
     @Query('page') page?: string,
@@ -143,6 +504,40 @@ export class PaymentController {
   @UseGuards(AuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get one logged-in user payment' })
+  @ApiParam({
+    name: 'id',
+    description: 'Payment ID',
+    example: 'payment_01',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Payment retrieved.',
+    schema: {
+      example: {
+        success: true,
+        data: {
+          id: 'payment_01',
+          userId: 'student_jacob_jones',
+          tutorId: 'tutor_albert_flores',
+          courseId: 'course_advanced_math_101',
+          amount: 94,
+          currency: 'usd',
+          status: 'PAID',
+          type: 'GROUP',
+          payoutStatus: 'PENDING',
+          tutor: {
+            id: 'tutor_albert_flores',
+            fullName: 'Albert Flores',
+            email: 'albert.flores@example.com',
+          },
+          course: {
+            id: 'course_advanced_math_101',
+            title: 'Advanced Mathematics',
+          },
+        },
+      },
+    },
+  })
   findOne(@Req() req: any, @Param('id') id: string) {
     return this.paymentService.findOne(req.user.userId, id);
   }

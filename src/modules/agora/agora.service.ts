@@ -55,6 +55,21 @@ export class AgoraService {
     };
   }
 
+  buildRtcJoinCredentials(input: {
+    channelName: string;
+    account: string;
+    role?: AgoraRole;
+    expireSeconds?: number;
+  }) {
+    return {
+      camera: this.buildRtcToken(input),
+      screenShare: this.buildRtcToken({
+        ...input,
+        account: `${input.account}:screen`,
+      }),
+    };
+  }
+
   buildChannelName(courseId: string, curriculumIndex: number) {
     return `lesson-${courseId}-${curriculumIndex}`.replace(
       /[^a-zA-Z0-9 !#$%&()+\-:;<=.>?@[\]^_{|}~,]/g,

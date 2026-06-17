@@ -380,6 +380,76 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     return { received: true };
   }
 
+  async syncCheckoutSession(userId: string, sessionId: string) {
+    const session = await this.stripe.checkout.sessions.retrieve(sessionId);
+
+    const payment = await this.prisma.payment.findFirst({
+      where: {
+        stripeSessionId: session.id,
+        userId,
+      },
+      select: {
+        id: true,
+        courseId: true,
+        userId: true,
+        status: true,
+        type: true,
+      },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('Checkout session payment not found');
+    }
+
+    if (session.payment_status === 'paid') {
+      await this.handleCheckoutCompleted(session);
+    } else if (session.status === 'expired') {
+      await this.updatePaymentFromSession(session, PaymentStatus.CANCELLED);
+    }
+
+    const syncedPayment = await this.prisma.payment.findUnique({
+      where: {
+        id: payment.id,
+      },
+      select: {
+        id: true,
+        courseId: true,
+        status: true,
+        type: true,
+      },
+    });
+
+    const enrolled =
+      syncedPayment?.type === PaymentType.GROUP && syncedPayment.courseId
+        ? Boolean(
+            await this.prisma.courseEnrollment.findUnique({
+              where: {
+                courseId_studentId: {
+                  courseId: syncedPayment.courseId,
+                  studentId: userId,
+                },
+              },
+              select: {
+                id: true,
+              },
+            }),
+          )
+        : false;
+
+    return {
+      success: true,
+      data: {
+        sessionId: session.id,
+        paymentId: payment.id,
+        paymentStatus: syncedPayment?.status ?? payment.status,
+        stripePaymentStatus: session.payment_status,
+        stripeSessionStatus: session.status,
+        enrolled,
+        courseId: syncedPayment?.courseId ?? payment.courseId,
+      },
+    };
+  }
+
   async findMyPayments(userId: string) {
     const payments = await this.prisma.payment.findMany({
       where: { userId },

@@ -62,6 +62,14 @@ export class ClassesService {
         category: true,
         image: true,
         curriculums: true,
+        curriculumItems: {
+          orderBy: [{ date: 'asc' }, { time: 'asc' }, { id: 'asc' }],
+          select: {
+            title: true,
+            date: true,
+            time: true,
+          },
+        },
         startDate: true,
         time: true,
         classDuration: true,
@@ -183,6 +191,14 @@ export class ClassesService {
             resources: {
               orderBy: {
                 createdAt: 'desc',
+              },
+            },
+            curriculumItems: {
+              orderBy: [{ date: 'asc' }, { time: 'asc' }, { id: 'asc' }],
+              select: {
+                title: true,
+                date: true,
+                time: true,
               },
             },
             curriculumProgress: {
@@ -663,6 +679,11 @@ export class ClassesService {
           account: tutorId,
           role: 'publisher',
         }),
+        screenShare: this.agoraService.buildRtcJoinCredentials({
+          channelName,
+          account: tutorId,
+          role: 'publisher',
+        }).screenShare,
       },
     };
   }
@@ -801,18 +822,20 @@ export class ClassesService {
     id: string;
     title: string;
     curriculums: string[];
+    curriculumItems?: {
+      title: string;
+      date: Date;
+      time: string;
+    }[];
     startDate: Date;
     time: string;
     classDuration: number;
   }) {
-    const lessonTitles = course.curriculums.length
-      ? course.curriculums
-      : [course.title];
+    const lessonItems = this.getCourseLessonItems(course);
 
-    return lessonTitles.map((title, curriculumIndex) => {
-      const date = new Date(course.startDate);
-      date.setDate(date.getDate() + curriculumIndex);
-      const startsAt = this.combineDateAndTime(date, course.time);
+    return lessonItems.map((item, curriculumIndex) => {
+      const date = new Date(item.date);
+      const startsAt = this.combineDateAndTime(date, item.time);
       const endsAt = new Date(
         startsAt.getTime() + course.classDuration * 60 * 1000,
       );
@@ -821,11 +844,11 @@ export class ClassesService {
       return {
         id: `${course.id}:${curriculumIndex}`,
         curriculumIndex,
-        title: title || `Session ${curriculumIndex + 1}`,
+        title: item.title || `Session ${curriculumIndex + 1}`,
         date,
         startsAt,
         endsAt,
-        time: course.time,
+        time: item.time,
         dateLabel: this.formatDate(date),
         timeLabel: this.formatTime(startsAt),
         durationMinutes: course.classDuration,
@@ -839,24 +862,26 @@ export class ClassesService {
     id: string;
     title: string;
     curriculums: string[];
+    curriculumItems?: {
+      title: string;
+      date: Date;
+      time: string;
+    }[];
     startDate: Date;
     time: string;
     classDuration: number;
   }) {
-    const lessonTitles = course.curriculums.length
-      ? course.curriculums
-      : [course.title];
+    const lessonItems = this.getCourseLessonItems(course);
 
-    return lessonTitles.map((title, index) => {
-      const date = new Date(course.startDate);
-      date.setDate(date.getDate() + index);
-      const lessonDate = this.combineDateAndTime(date, course.time);
+    return lessonItems.map((item, index) => {
+      const date = new Date(item.date);
+      const lessonDate = this.combineDateAndTime(date, item.time);
 
       return {
         id: `${course.id}-${index}`,
-        title: title || `Session ${index + 1}`,
+        title: item.title || `Session ${index + 1}`,
         date,
-        time: course.time,
+        time: item.time,
         durationMinutes: course.classDuration,
         status: this.getLessonStatus(lessonDate, course.classDuration),
       };
@@ -898,7 +923,16 @@ export class ClassesService {
     const course = await this.prisma.course.findUnique({
       where: { id: courseId },
       select: {
+        title: true,
         curriculums: true,
+        curriculumItems: {
+          orderBy: [{ date: 'asc' }, { time: 'asc' }, { id: 'asc' }],
+          select: {
+            title: true,
+            date: true,
+            time: true,
+          },
+        },
         startDate: true,
         time: true,
         classDuration: true,
@@ -909,16 +943,15 @@ export class ClassesService {
       throw new NotFoundException('Course not found');
     }
 
-    return course.curriculums.map((title, index) => {
-      const date = new Date(course.startDate);
-      date.setDate(date.getDate() + index);
-      const lessonDate = this.combineDateAndTime(date, course.time);
+    return this.getCourseLessonItems(course).map((item, index) => {
+      const date = new Date(item.date);
+      const lessonDate = this.combineDateAndTime(date, item.time);
 
       return {
         id: `${courseId}-${index}`,
-        title,
+        title: item.title,
         date,
-        time: course.time,
+        time: item.time,
         durationMinutes: course.classDuration,
         status: this.getLessonStatus(lessonDate, course.classDuration),
       };
@@ -978,6 +1011,37 @@ export class ClassesService {
     }
 
     return combined;
+  }
+
+  private getCourseLessonItems(course: {
+    title: string;
+    curriculums: string[];
+    curriculumItems?: {
+      title: string;
+      date: Date;
+      time: string;
+    }[];
+    startDate: Date;
+    time: string;
+  }) {
+    if (course.curriculumItems?.length) {
+      return course.curriculumItems;
+    }
+
+    const lessonTitles = course.curriculums.length
+      ? course.curriculums
+      : [course.title];
+
+    return lessonTitles.map((title, index) => {
+      const date = new Date(course.startDate);
+      date.setDate(date.getDate() + index);
+
+      return {
+        title,
+        date,
+        time: course.time,
+      };
+    });
   }
 
   private parseTime(time: string) {

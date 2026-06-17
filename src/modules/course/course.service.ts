@@ -4,8 +4,15 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { Prisma, Role } from '@prisma/client';
+import {
+  PaymentStatus,
+  PaymentType,
+  PayoutStatus,
+  Prisma,
+  Role,
+} from '@prisma/client';
 import { randomUUID } from 'crypto';
+import Stripe = require('stripe');
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
   CoursePriceFilter,
@@ -52,7 +59,15 @@ type EnrollmentRow = {
 
 @Injectable()
 export class CourseService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly stripe?: Stripe.Stripe;
+
+  constructor(private readonly prisma: PrismaService) {
+    const secretKey = process.env.STRIPE_SECRET_KEY;
+
+    if (secretKey) {
+      this.stripe = new Stripe(secretKey);
+    }
+  }
 
   async createCourse(tutorId: string, dto: CreateCourseDto) {
     const isTutor = await this.prisma.user.findFirst({
@@ -76,28 +91,24 @@ export class CourseService {
 
     const curriculumItems = this.normalizeCourseLessons(dto);
     const { curriculumItems: _curriculumItems, ...courseDto } = dto;
-    const course = await this.prisma.$transaction(async (tx) => {
-      const createdCourse = await tx.course.create({
-        data: {
-          ...courseDto,
-          curriculums: curriculumItems.map((item) => item.title),
-          startDate: new Date(dto.startDate ?? curriculumItems[0].date),
-          time: dto.time ?? curriculumItems[0].time,
-          enrollmentDeadline: new Date(dto.enrollmentDeadline),
-          tutorId,
+    const course = await this.prisma.course.create({
+      data: {
+        ...courseDto,
+        curriculums: curriculumItems.map((item) => item.title),
+        startDate: new Date(dto.startDate ?? curriculumItems[0].date),
+        time: dto.time ?? curriculumItems[0].time,
+        enrollmentDeadline: new Date(dto.enrollmentDeadline),
+        tutorId,
+        curriculumItems: {
+          createMany: {
+            data: curriculumItems.map((item) => ({
+              title: item.title,
+              date: new Date(item.date),
+              time: item.time,
+            })),
+          },
         },
-      });
-
-      await tx.curriculum.createMany({
-        data: curriculumItems.map((item) => ({
-          courseId: createdCourse.id,
-          title: item.title,
-          date: new Date(item.date),
-          time: item.time,
-        })),
-      });
-
-      return createdCourse;
+      },
     });
 
     return {
@@ -172,46 +183,35 @@ export class CourseService {
       ? this.normalizeCourseLessons(dto)
       : null;
     const { curriculumItems: _curriculumItems, ...courseDto } = dto;
-    const updatedCourse = await this.prisma.$transaction(async (tx) => {
-      const savedCourse = await tx.course.update({
-        where: {
-          id: courseId,
-        },
-        data: {
-          ...courseDto,
-          ...(curriculumItems && {
-            curriculums: curriculumItems.map((item) => item.title),
-            startDate: new Date(dto.startDate ?? curriculumItems[0].date),
-            time: dto.time ?? curriculumItems[0].time,
-          }),
-          ...(dto.startDate &&
-            !curriculumItems && {
-              startDate: new Date(dto.startDate),
-            }),
-          ...(dto.enrollmentDeadline && {
-            enrollmentDeadline: new Date(dto.enrollmentDeadline),
-          }),
-        },
-      });
-
-      if (curriculumItems) {
-        await tx.curriculum.deleteMany({
-          where: {
-            courseId,
+    const updatedCourse = await this.prisma.course.update({
+      where: {
+        id: courseId,
+      },
+      data: {
+        ...courseDto,
+        ...(curriculumItems && {
+          curriculums: curriculumItems.map((item) => item.title),
+          startDate: new Date(dto.startDate ?? curriculumItems[0].date),
+          time: dto.time ?? curriculumItems[0].time,
+          curriculumItems: {
+            deleteMany: {},
+            createMany: {
+              data: curriculumItems.map((item) => ({
+                title: item.title,
+                date: new Date(item.date),
+                time: item.time,
+              })),
+            },
           },
-        });
-
-        await tx.curriculum.createMany({
-          data: curriculumItems.map((item) => ({
-            courseId,
-            title: item.title,
-            date: new Date(item.date),
-            time: item.time,
-          })),
-        });
-      }
-
-      return savedCourse;
+        }),
+        ...(dto.startDate &&
+          !curriculumItems && {
+            startDate: new Date(dto.startDate),
+          }),
+        ...(dto.enrollmentDeadline && {
+          enrollmentDeadline: new Date(dto.enrollmentDeadline),
+        }),
+      },
     });
 
     return {
@@ -810,6 +810,8 @@ export class CourseService {
       return [];
     }
 
+    await this.syncPaidCourseEnrollments(courseIds);
+
     const enrollmentCounts = await this.prisma.$queryRaw<
       { courseId: string; count: number }[]
     >`
@@ -838,6 +840,143 @@ export class CourseService {
         ),
       };
     });
+  }
+
+  private async syncPaidCourseEnrollments(courseIds: string[]) {
+    await this.syncPaidStripeCheckoutSessions(courseIds);
+
+    const paidGroupPayments = await this.prisma.payment.findMany({
+      where: {
+        courseId: {
+          in: courseIds,
+          not: null,
+        },
+        type: PaymentType.GROUP,
+        status: PaymentStatus.PAID,
+      },
+      select: {
+        courseId: true,
+        userId: true,
+      },
+    });
+
+    const enrollments = paidGroupPayments
+      .filter(
+        (payment): payment is { courseId: string; userId: string } =>
+          Boolean(payment.courseId),
+      )
+      .map((payment) => ({
+        courseId: payment.courseId,
+        studentId: payment.userId,
+      }));
+
+    if (enrollments.length === 0) {
+      return;
+    }
+
+    await this.prisma.courseEnrollment.createMany({
+      data: enrollments,
+      skipDuplicates: true,
+    });
+  }
+
+  private async syncPaidStripeCheckoutSessions(courseIds: string[]) {
+    if (!this.stripe) {
+      return;
+    }
+
+    const pendingPayments = await this.prisma.payment.findMany({
+      where: {
+        courseId: {
+          in: courseIds,
+          not: null,
+        },
+        type: PaymentType.GROUP,
+        status: PaymentStatus.PENDING,
+        stripeSessionId: {
+          not: null,
+        },
+      },
+      select: {
+        id: true,
+        courseId: true,
+        userId: true,
+        amount: true,
+        stripeSessionId: true,
+      },
+      take: 25,
+    });
+
+    for (const payment of pendingPayments) {
+      if (!payment.courseId || !payment.stripeSessionId) {
+        continue;
+      }
+
+      try {
+        const session = await this.stripe.checkout.sessions.retrieve(
+          payment.stripeSessionId,
+        );
+
+        if (session.payment_status !== 'paid') {
+          continue;
+        }
+
+        const paidAt = new Date();
+        const commissionRate = Number(
+          process.env.PLATFORM_COMMISSION_RATE ?? 0.2,
+        );
+        const commissionAmount = payment.amount * commissionRate;
+        const tutorAmount = payment.amount - commissionAmount;
+
+        await this.prisma.$transaction(async (tx) => {
+          await tx.payment.update({
+            where: {
+              id: payment.id,
+            },
+            data: {
+              status: PaymentStatus.PAID,
+              payoutStatus: PayoutStatus.ON_HOLD,
+              paidAt,
+              holdUntil: this.addHours(
+                paidAt,
+                Number(process.env.PAYOUT_HOLD_HOURS ?? 48),
+              ),
+              commissionRate,
+              commissionAmount,
+              tutorAmount,
+              payoutFailureReason: null,
+              stripePaymentIntentId:
+                typeof session.payment_intent === 'string'
+                  ? session.payment_intent
+                  : session.payment_intent?.id,
+            },
+          });
+
+          await tx.courseEnrollment.upsert({
+            where: {
+              courseId_studentId: {
+                courseId: payment.courseId as string,
+                studentId: payment.userId,
+              },
+            },
+            update: {},
+            create: {
+              courseId: payment.courseId as string,
+              studentId: payment.userId,
+            },
+          });
+        });
+      } catch (error) {
+        console.error(
+          `Failed to sync Stripe checkout session ${payment.stripeSessionId}`,
+          error,
+        );
+      }
+    }
+  }
+
+  private addHours(date: Date, hours: number) {
+    return new Date(date.getTime() + hours * 60 * 60 * 1000);
   }
 
   private async getCourseEnrollmentCount(courseId: string) {

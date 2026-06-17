@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { setDefaultResultOrder } from 'dns';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
@@ -10,8 +11,17 @@ setDefaultResultOrder('ipv4first');
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
-    rawBody: true,
+    bodyParser: false,
   });
+
+  const saveRawBody = (req: any, _res: any, buffer: Buffer) => {
+    if (buffer?.length) {
+      req.rawBody = Buffer.from(buffer);
+    }
+  };
+
+  app.use(json({ limit: '25mb', verify: saveRawBody }));
+  app.use(urlencoded({ extended: true, limit: '25mb', verify: saveRawBody }));
 
   app.useGlobalPipes(
     new ValidationPipe({

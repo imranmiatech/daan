@@ -535,6 +535,44 @@ export class PaymentController {
     return this.paymentService.processDuePayouts();
   }
 
+  @Get('checkout-session/:sessionId')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.STUDENT)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Verify a Stripe Checkout session and sync enrollment',
+    description:
+      'Use this on the payment success page with the Stripe session_id. If Stripe confirms the session is paid, the payment is marked paid and group-course enrollment is created.',
+  })
+  @ApiParam({
+    name: 'sessionId',
+    description: 'Stripe Checkout Session ID returned by create-checkout-session',
+    example: 'cs_test_123',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Checkout session status synced.',
+    schema: {
+      example: {
+        success: true,
+        data: {
+          sessionId: 'cs_test_123',
+          paymentId: 'payment_01',
+          paymentStatus: 'PAID',
+          stripePaymentStatus: 'paid',
+          enrolled: true,
+          courseId: 'course_advanced_math_101',
+        },
+      },
+    },
+  })
+  syncCheckoutSession(
+    @CurrentUser() user: { userId: string },
+    @Param('sessionId') sessionId: string,
+  ) {
+    return this.paymentService.syncCheckoutSession(user.userId, sessionId);
+  }
+
   @Get(':id')
   @UseGuards(AuthGuard)
   @ApiBearerAuth()

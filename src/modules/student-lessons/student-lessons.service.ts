@@ -169,6 +169,11 @@ export class StudentLessonsService {
           account: studentId,
           role: 'publisher',
         }),
+        screenShare: this.agoraService.buildRtcJoinCredentials({
+          channelName,
+          account: studentId,
+          role: 'publisher',
+        }).screenShare,
       },
     };
   }
@@ -258,6 +263,14 @@ export class StudentLessonsService {
       include: {
         course: {
           include: {
+            curriculumItems: {
+              orderBy: [{ date: 'asc' }, { time: 'asc' }, { id: 'asc' }],
+              select: {
+                title: true,
+                date: true,
+                time: true,
+              },
+            },
             tutor: {
               select: {
                 id: true,
@@ -338,20 +351,14 @@ export class StudentLessonsService {
     stateByLesson: Map<string, LessonStateOverride>,
   ): StudentLesson[] {
     const { course } = enrollment;
-    const lessonTitles = course.curriculums.length
-      ? course.curriculums
-      : [course.title];
+    const lessonItems = this.getCourseLessonItems(course);
     const tutorProfile = course.tutor.profile;
     const review = tutorProfile?.id
       ? (reviewByTutorProfile.get(tutorProfile.id) ?? null)
       : null;
 
-    return lessonTitles.map((title, curriculumIndex) => {
-      const startsAt = this.getLessonStartAt(
-        course.startDate,
-        course.time,
-        curriculumIndex,
-      );
+    return lessonItems.map((item, curriculumIndex) => {
+      const startsAt = this.getLessonStartAt(item.date, item.time);
       const endsAt = new Date(
         startsAt.getTime() + course.classDuration * 60 * 1000,
       );
@@ -367,7 +374,7 @@ export class StudentLessonsService {
         id: `${course.id}:${curriculumIndex}`,
         courseId: course.id,
         curriculumIndex,
-        title,
+        title: item.title,
         courseTitle: course.title,
         image: course.image,
         lessonType: course.maxStudent > 1 ? 'Group' : 'Private',
@@ -436,10 +443,8 @@ export class StudentLessonsService {
   private getLessonStartAt(
     courseStartDate: Date,
     courseTime: string,
-    curriculumIndex: number,
   ) {
     const date = new Date(courseStartDate);
-    date.setDate(date.getDate() + curriculumIndex);
     const parsedTime = this.parseTime(courseTime);
 
     if (parsedTime) {
@@ -447,6 +452,37 @@ export class StudentLessonsService {
     }
 
     return date;
+  }
+
+  private getCourseLessonItems(course: {
+    title: string;
+    curriculums: string[];
+    curriculumItems?: {
+      title: string;
+      date: Date;
+      time: string;
+    }[];
+    startDate: Date;
+    time: string;
+  }) {
+    if (course.curriculumItems?.length) {
+      return course.curriculumItems;
+    }
+
+    const lessonTitles = course.curriculums.length
+      ? course.curriculums
+      : [course.title];
+
+    return lessonTitles.map((title, index) => {
+      const date = new Date(course.startDate);
+      date.setDate(date.getDate() + index);
+
+      return {
+        title,
+        date,
+        time: course.time,
+      };
+    });
   }
 
   private parseTime(time: string) {

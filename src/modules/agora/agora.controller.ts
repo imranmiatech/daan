@@ -10,12 +10,12 @@ import { CreateAgoraRtcTokenDto } from './dto/agora-token.dto';
 @ApiTags('Agora')
 @Controller('agora')
 @UseGuards(AuthGuard, RolesGuard)
-@Roles(Role.STUDENT, Role.TUTOR, Role.ADMIN)
 @ApiBearerAuth()
 export class AgoraController {
   constructor(private readonly agoraService: AgoraService) {}
 
   @Get('config')
+  @Roles(Role.STUDENT, Role.TUTOR, Role.ADMIN)
   @ApiOperation({ summary: 'Get public Agora client config' })
   getConfig() {
     return {
@@ -25,8 +25,9 @@ export class AgoraController {
   }
 
   @Post('rtc-token')
+  @Roles(Role.ADMIN)
   @ApiOperation({
-    summary: 'Create an Agora RTC token for an authenticated user',
+    summary: 'Create a raw Agora RTC token for admin/debug use',
   })
   createRtcToken(
     @CurrentUser() user: { userId: string },

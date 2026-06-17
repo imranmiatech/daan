@@ -500,6 +500,119 @@ export class PaymentController {
     });
   }
 
+  @Get('student/private-lessons')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.STUDENT)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get student private 1-on-1 lesson bookings',
+  })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 10 })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['upcoming', 'live', 'completed', 'cancelled'],
+    example: 'upcoming',
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    example: 'David',
+  })
+  findStudentPrivateLessons(
+    @CurrentUser() user: { userId: string },
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.paymentService.findStudentPrivateLessons(user.userId, {
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+      status,
+      search,
+    });
+  }
+
+  @Get('tutor/private-lessons/:paymentId/join-preview')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.TUTOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get tutor private lesson join preview' })
+  @ApiParam({
+    name: 'paymentId',
+    description: 'Private lesson payment ID',
+    example: 'payment_private_01',
+  })
+  getTutorPrivateLessonJoinPreview(
+    @CurrentUser() user: { userId: string },
+    @Param('paymentId') paymentId: string,
+  ) {
+    return this.paymentService.getTutorPrivateLessonJoinPreview(
+      user.userId,
+      paymentId,
+    );
+  }
+
+  @Post('tutor/private-lessons/:paymentId/join')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.TUTOR)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Join/start a tutor private lesson and receive Agora credentials',
+  })
+  @ApiParam({
+    name: 'paymentId',
+    description: 'Private lesson payment ID',
+    example: 'payment_private_01',
+  })
+  joinTutorPrivateLesson(
+    @CurrentUser() user: { userId: string },
+    @Param('paymentId') paymentId: string,
+  ) {
+    return this.paymentService.joinTutorPrivateLesson(user.userId, paymentId);
+  }
+
+  @Get('student/private-lessons/:paymentId/join-preview')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.STUDENT)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get student private lesson join preview' })
+  @ApiParam({
+    name: 'paymentId',
+    description: 'Private lesson payment ID',
+    example: 'payment_private_01',
+  })
+  getStudentPrivateLessonJoinPreview(
+    @CurrentUser() user: { userId: string },
+    @Param('paymentId') paymentId: string,
+  ) {
+    return this.paymentService.getStudentPrivateLessonJoinPreview(
+      user.userId,
+      paymentId,
+    );
+  }
+
+  @Post('student/private-lessons/:paymentId/join')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.STUDENT)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Join a student private lesson and receive Agora credentials',
+  })
+  @ApiParam({
+    name: 'paymentId',
+    description: 'Private lesson payment ID',
+    example: 'payment_private_01',
+  })
+  joinStudentPrivateLesson(
+    @CurrentUser() user: { userId: string },
+    @Param('paymentId') paymentId: string,
+  ) {
+    return this.paymentService.joinStudentPrivateLesson(user.userId, paymentId);
+  }
+
   @Post('tutor/connect/onboarding')
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(Role.TUTOR)

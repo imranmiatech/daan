@@ -36,6 +36,9 @@ model Payment {
   paidOutAt             DateTime?
   payoutTransferId      String?
   payoutFailureReason   String?
+  privateLessonStartsAt DateTime?
+  privateLessonDuration Int?
+  privateLessonSessions Int?
   stripeSessionId       String?       @unique
   stripePaymentIntentId String?
   createdAt             DateTime      @default(now())
@@ -51,4 +54,5 @@ model Payment {
   @@index([type])
   @@index([status])
   @@index([payoutStatus])
+  @@index([privateLessonStartsAt])
 }

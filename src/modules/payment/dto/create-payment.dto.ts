@@ -1,4 +1,11 @@
-import { IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsDateString,
+  IsInt,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateCheckoutSessionDto {
@@ -27,7 +34,17 @@ export class CreateCheckoutSessionDto {
     example: 2,
   })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   sessionCount?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Selected private lesson start time. Required for scheduled private tutor bookings.',
+    example: '2026-06-18T15:00:00.000Z',
+  })
+  @IsOptional()
+  @IsDateString()
+  scheduledAt?: string;
 }

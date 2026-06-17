@@ -15,6 +15,7 @@ import {
 } from '@prisma/client';
 import Stripe = require('stripe');
 import { PrismaService } from 'src/prisma/prisma.service';
+import { AgoraService } from '../agora/agora.service';
 import { CreateCheckoutSessionDto } from './dto/create-payment.dto';
 
 type TutorDashboardTransactionQuery = {
@@ -38,13 +39,23 @@ type TutorPrivateLessonsQuery = {
   search?: string;
 };
 
+type PrivateLessonQuery = {
+  page?: number;
+  limit?: number;
+  status?: string;
+  search?: string;
+};
+
 @Injectable()
 export class PaymentService implements OnModuleInit, OnModuleDestroy {
   private readonly stripe: Stripe.Stripe;
   private payoutInterval?: NodeJS.Timeout;
   private isProcessingPayouts = false;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly agoraService: AgoraService,
+  ) {
     const secretKey = process.env.STRIPE_SECRET_KEY;
 
     if (!secretKey) {
@@ -246,6 +257,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
         profile: {
           select: {
             pricePerHour: true,
+            sessionDuration: true,
           },
         },
       },
@@ -262,6 +274,14 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     }
 
     const sessionCount = dto.sessionCount ?? 1;
+    const sessionDuration = tutor.profile?.sessionDuration ?? 60;
+    const durationMinutes = sessionCount * sessionDuration;
+    const scheduledAt = dto.scheduledAt ? new Date(dto.scheduledAt) : null;
+
+    if (scheduledAt && Number.isNaN(scheduledAt.getTime())) {
+      throw new BadRequestException('scheduledAt must be a valid date');
+    }
+
     const amount = pricePerHour * sessionCount;
 
     const payment = await this.prisma.payment.create({
@@ -273,6 +293,9 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
         status: PaymentStatus.PENDING,
         type: PaymentType.PRIVATE,
         payoutStatus: PayoutStatus.PENDING,
+        privateLessonStartsAt: scheduledAt,
+        privateLessonDuration: durationMinutes,
+        privateLessonSessions: sessionCount,
       },
     });
 
@@ -298,6 +321,8 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
         userId,
         type: PaymentType.PRIVATE,
         sessionCount: String(sessionCount),
+        durationMinutes: String(durationMinutes),
+        ...(scheduledAt && { scheduledAt: scheduledAt.toISOString() }),
       },
       success_url: `${frontendUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${frontendUrl}/payment/cancel`,
@@ -1201,6 +1226,203 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  async findStudentPrivateLessons(studentId: string, query: PrivateLessonQuery) {
+    const page = Math.max(1, query.page || 1);
+    const limit = Math.min(Math.max(1, query.limit || 10), 100);
+    const skip = (page - 1) * limit;
+    const search = query.search?.trim();
+    const requestedStatus = this.parsePrivateLessonStatus(query.status);
+
+    const where: Prisma.PaymentWhereInput = {
+      userId: studentId,
+      type: PaymentType.PRIVATE,
+      ...(search && {
+        OR: [
+          {
+            tutor: {
+              fullName: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+          },
+          {
+            tutor: {
+              email: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+          },
+        ],
+      }),
+    };
+
+    if (requestedStatus === 'upcoming') {
+      where.status = { in: [PaymentStatus.PENDING, PaymentStatus.PAID] };
+    }
+
+    if (requestedStatus === 'cancelled') {
+      where.status = { in: [PaymentStatus.CANCELLED, PaymentStatus.FAILED] };
+    }
+
+    if (requestedStatus === 'live' || requestedStatus === 'completed') {
+      where.status = PaymentStatus.PAID;
+    }
+
+    const querySkip = requestedStatus ? 0 : skip;
+    const queryTake = requestedStatus ? undefined : limit;
+
+    const [totalBeforeDerivedFilter, payments] = await Promise.all([
+      this.prisma.payment.count({ where }),
+      this.prisma.payment.findMany({
+        where,
+        skip: querySkip,
+        ...(queryTake && { take: queryTake }),
+        orderBy: [{ privateLessonStartsAt: 'asc' }, { createdAt: 'desc' }],
+        include: {
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              profile: {
+                select: {
+                  avatarUrl: true,
+                },
+              },
+            },
+          },
+          tutor: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              profile: {
+                select: {
+                  avatarUrl: true,
+                  pricePerHour: true,
+                  sessionDuration: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const rows = payments
+      .map((payment) => this.serializePrivateLesson(payment))
+      .filter((lesson) =>
+        requestedStatus ? lesson.status === requestedStatus : true,
+      );
+    const pageRows = requestedStatus ? rows.slice(skip, skip + limit) : rows;
+    const total = requestedStatus ? rows.length : totalBeforeDerivedFilter;
+    const totalPages = Math.ceil(total / limit);
+    const from = total === 0 ? 0 : skip + 1;
+    const to = Math.min(skip + pageRows.length, total);
+
+    return {
+      success: true,
+      data: pageRows,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages,
+        from,
+        to,
+        hasPreviousPage: page > 1,
+        hasNextPage: page < totalPages,
+        filters: {
+          status: requestedStatus ?? 'all',
+          search: search ?? null,
+        },
+      },
+    };
+  }
+
+  async getTutorPrivateLessonJoinPreview(tutorId: string, paymentId: string) {
+    const lesson = await this.getPrivateLessonForTutor(tutorId, paymentId);
+    const channelName = this.agoraService.buildPrivateLessonChannelName(
+      lesson.paymentId,
+    );
+
+    return {
+      success: true,
+      data: {
+        lesson,
+        deviceChecks: [
+          {
+            type: 'camera',
+            label: 'Camera is ready',
+            required: true,
+          },
+          {
+            type: 'microphone',
+            label: 'Microphone is ready',
+            required: true,
+          },
+        ],
+        agora: {
+          ...this.agoraService.getClientConfig(),
+          channelName,
+        },
+      },
+    };
+  }
+
+  async joinTutorPrivateLesson(tutorId: string, paymentId: string) {
+    const lesson = await this.getPrivateLessonForTutor(tutorId, paymentId);
+
+    return this.buildPrivateLessonJoinResponse({
+      lesson,
+      account: tutorId,
+    });
+  }
+
+  async getStudentPrivateLessonJoinPreview(
+    studentId: string,
+    paymentId: string,
+  ) {
+    const lesson = await this.getPrivateLessonForStudent(studentId, paymentId);
+    const channelName = this.agoraService.buildPrivateLessonChannelName(
+      lesson.paymentId,
+    );
+
+    return {
+      success: true,
+      data: {
+        lesson,
+        deviceChecks: [
+          {
+            type: 'camera',
+            label: 'Camera is ready',
+            required: true,
+          },
+          {
+            type: 'microphone',
+            label: 'Microphone is ready',
+            required: true,
+          },
+        ],
+        agora: {
+          ...this.agoraService.getClientConfig(),
+          channelName,
+        },
+      },
+    };
+  }
+
+  async joinStudentPrivateLesson(studentId: string, paymentId: string) {
+    const lesson = await this.getPrivateLessonForStudent(studentId, paymentId);
+
+    return this.buildPrivateLessonJoinResponse({
+      lesson,
+      account: studentId,
+    });
+  }
+
   async createTutorConnectOnboarding(userId: string) {
     const tutor = await this.prisma.user.findFirst({
       where: {
@@ -1548,6 +1770,196 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  private async getPrivateLessonForTutor(tutorId: string, paymentId: string) {
+    const payment = await this.getPrivateLessonPayment({
+      paymentId,
+      tutorId,
+    });
+
+    return this.serializePrivateLesson(payment);
+  }
+
+  private async getPrivateLessonForStudent(studentId: string, paymentId: string) {
+    const payment = await this.getPrivateLessonPayment({
+      paymentId,
+      studentId,
+    });
+
+    return this.serializePrivateLesson(payment);
+  }
+
+  private async getPrivateLessonPayment(input: {
+    paymentId: string;
+    tutorId?: string;
+    studentId?: string;
+  }) {
+    const payment = await this.prisma.payment.findFirst({
+      where: {
+        id: input.paymentId,
+        type: PaymentType.PRIVATE,
+        ...(input.tutorId && { tutorId: input.tutorId }),
+        ...(input.studentId && { userId: input.studentId }),
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            profile: {
+              select: {
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+        tutor: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            profile: {
+              select: {
+                avatarUrl: true,
+                pricePerHour: true,
+                sessionDuration: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('Private lesson not found');
+    }
+
+    return payment;
+  }
+
+  private serializePrivateLesson(
+    payment: Prisma.PaymentGetPayload<{
+      include: {
+        user: {
+          select: {
+            id: true;
+            fullName: true;
+            email: true;
+            profile: {
+              select: {
+                avatarUrl: true;
+              };
+            };
+          };
+        };
+        tutor: {
+          select: {
+            id: true;
+            fullName: true;
+            email: true;
+            profile: {
+              select: {
+                avatarUrl: true;
+                pricePerHour: true;
+                sessionDuration: true;
+              };
+            };
+          };
+        };
+      };
+    }>,
+  ) {
+    const pricePerHour = payment.tutor.profile?.pricePerHour ?? null;
+    const defaultDurationMinutes = payment.tutor.profile?.sessionDuration ?? 60;
+    const sessionCount =
+      payment.privateLessonSessions ??
+      (pricePerHour && pricePerHour > 0
+        ? Math.max(1, Math.round(payment.amount / pricePerHour))
+        : 1);
+    const durationMinutes =
+      payment.privateLessonDuration ?? sessionCount * defaultDurationMinutes;
+    const startsAt = payment.privateLessonStartsAt ?? payment.createdAt;
+    const endsAt = new Date(
+      startsAt.getTime() + durationMinutes * 60 * 1000,
+    );
+    const status = this.getPrivateLessonStatus(
+      payment.status,
+      startsAt,
+      endsAt,
+    );
+
+    return {
+      id: payment.id,
+      paymentId: payment.id,
+      student: {
+        id: payment.user.id,
+        name: payment.user.fullName,
+        email: payment.user.email,
+        image: payment.user.profile?.avatarUrl ?? null,
+      },
+      tutor: {
+        id: payment.tutor.id,
+        name: payment.tutor.fullName,
+        email: payment.tutor.email,
+        image: payment.tutor.profile?.avatarUrl ?? null,
+      },
+      dateTime: {
+        startsAt,
+        endsAt,
+        date: startsAt,
+        time: startsAt,
+      },
+      duration: {
+        minutes: durationMinutes,
+        label: this.formatDuration(durationMinutes),
+        sessionCount,
+      },
+      amount: payment.amount,
+      currency: payment.currency,
+      status,
+      paymentStatus: this.formatPaymentStatus(payment.status),
+      payoutStatus: payment.payoutStatus.toLowerCase(),
+      canJoin: payment.status === PaymentStatus.PAID && status === 'live',
+      createdAt: payment.createdAt,
+      updatedAt: payment.updatedAt,
+    };
+  }
+
+  private buildPrivateLessonJoinResponse(input: {
+    lesson: ReturnType<PaymentService['serializePrivateLesson']>;
+    account: string;
+  }) {
+    if (input.lesson.paymentStatus !== 'paid') {
+      throw new BadRequestException('Private lesson payment is not paid');
+    }
+
+    if (input.lesson.status === 'completed') {
+      throw new BadRequestException('This private lesson is already completed');
+    }
+
+    if (input.lesson.status === 'cancelled') {
+      throw new BadRequestException('This private lesson cannot be joined');
+    }
+
+    const channelName = this.agoraService.buildPrivateLessonChannelName(
+      input.lesson.paymentId,
+    );
+    const credentials = this.agoraService.buildRtcJoinCredentials({
+      channelName,
+      account: input.account,
+      role: 'publisher',
+    });
+
+    return {
+      success: true,
+      data: {
+        lesson: input.lesson,
+        agora: credentials.camera,
+        screenShare: credentials.screenShare,
+      },
+    };
+  }
+
   private getPayoutConfig() {
     return {
       commissionRate: Number(process.env.PLATFORM_COMMISSION_RATE ?? 0.2),
@@ -1681,11 +2093,13 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     defaultDurationMinutes: number,
   ) {
     const sessionCount =
-      pricePerHour && pricePerHour > 0
+      payment.privateLessonSessions ??
+      (pricePerHour && pricePerHour > 0
         ? Math.max(1, Math.round(payment.amount / pricePerHour))
-        : 1;
-    const durationMinutes = sessionCount * defaultDurationMinutes;
-    const scheduledAt = payment.createdAt;
+        : 1);
+    const durationMinutes =
+      payment.privateLessonDuration ?? sessionCount * defaultDurationMinutes;
+    const scheduledAt = payment.privateLessonStartsAt ?? payment.createdAt;
     const endsAt = new Date(
       scheduledAt.getTime() + durationMinutes * 60 * 1000,
     );

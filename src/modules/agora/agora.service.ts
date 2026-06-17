@@ -77,6 +77,13 @@ export class AgoraService {
     );
   }
 
+  buildPrivateLessonChannelName(paymentId: string) {
+    return `private-${paymentId}`.replace(
+      /[^a-zA-Z0-9 !#$%&()+\-:;<=.>?@[\]^_{|}~,]/g,
+      '-',
+    );
+  }
+
   private assertConfigured() {
     if (!this.appId || !this.appCertificate) {
       throw new BadRequestException(

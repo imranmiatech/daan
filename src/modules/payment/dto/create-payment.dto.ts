@@ -2,11 +2,51 @@ import { Type } from 'class-transformer';
 import {
   IsDateString,
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsString,
   Min,
 } from 'class-validator';
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+export class CreateGroupClassCheckoutSessionDto {
+  @ApiProperty({
+    description: 'Course/group class ID the student wants to enroll in.',
+    example: 'course_advanced_math_101',
+  })
+  @IsString()
+  @IsNotEmpty()
+  courseId: string;
+}
+
+export class CreatePrivateBookingCheckoutSessionDto {
+  @ApiProperty({
+    description: 'Tutor ID the student wants to book for a private 1-on-1 lesson.',
+    example: 'tutor_albert_flores',
+  })
+  @IsString()
+  @IsNotEmpty()
+  tutorId: string;
+
+  @ApiPropertyOptional({
+    description: 'Number of private sessions to purchase. Defaults to 1.',
+    minimum: 1,
+    example: 2,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  sessionCount?: number;
+
+  @ApiPropertyOptional({
+    description: 'Selected private lesson start time.',
+    example: '2026-06-18T15:00:00.000Z',
+  })
+  @IsOptional()
+  @IsDateString()
+  scheduledAt?: string;
+}
 
 export class CreateCheckoutSessionDto {
   @ApiPropertyOptional({

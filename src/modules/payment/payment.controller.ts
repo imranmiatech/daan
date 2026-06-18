@@ -6,6 +6,7 @@ import {
   Param,
   Post,
   Query,
+  Redirect,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -22,13 +23,139 @@ import { Role } from '@prisma/client';
 import { CurrentUser, Roles } from '../auth/decorators/roles.decorator';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { CreateCheckoutSessionDto } from './dto/create-payment.dto';
+import {
+  CreateCheckoutSessionDto,
+  CreateGroupClassCheckoutSessionDto,
+  CreatePrivateBookingCheckoutSessionDto,
+} from './dto/create-payment.dto';
 import { PaymentService } from './payment.service';
 
 @ApiTags('Payment')
 @Controller('payment')
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
+
+  @Post('group-class/create-checkout-session')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.STUDENT)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Create Stripe Checkout session for a group class',
+    description:
+      'Use this endpoint when a student pays to enroll in a tutor-created group class/course.',
+  })
+  @ApiBody({
+    type: CreateGroupClassCheckoutSessionDto,
+    examples: {
+      groupClassPayment: {
+        summary: 'Group class payment',
+        value: {
+          courseId: 'course_advanced_math_101',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Group class checkout session created.',
+    schema: {
+      example: {
+        success: true,
+        message: 'Checkout session created successfully',
+        data: {
+          payment: {
+            id: 'payment_01',
+            userId: 'student_jacob_jones',
+            tutorId: 'tutor_albert_flores',
+            courseId: 'course_advanced_math_101',
+            amount: 94,
+            currency: 'usd',
+            status: 'PENDING',
+            type: 'GROUP',
+            payoutStatus: 'PENDING',
+            stripeSessionId: 'cs_test_123',
+            createdAt: '2026-06-15T10:00:00.000Z',
+            updatedAt: '2026-06-15T10:00:00.000Z',
+          },
+          sessionId: 'cs_test_123',
+          url: 'https://checkout.stripe.com/c/pay/cs_test_123',
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Invalid request.' })
+  @ApiResponse({ status: 401, description: 'Unauthorized.' })
+  createGroupClassCheckoutSession(
+    @CurrentUser() user: { userId: string },
+    @Body() dto: CreateGroupClassCheckoutSessionDto,
+  ) {
+    return this.paymentService.createGroupClassCheckoutSession(
+      user.userId,
+      dto,
+    );
+  }
+
+  @Post('private-booking/create-checkout-session')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.STUDENT)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Create Stripe Checkout session for a private tutor booking',
+    description:
+      'Use this endpoint when a student books a private 1-on-1 tutor lesson. The tutor price comes from the tutor profile pricePerHour.',
+  })
+  @ApiBody({
+    type: CreatePrivateBookingCheckoutSessionDto,
+    examples: {
+      privateBookingPayment: {
+        summary: 'Private tutor booking payment',
+        value: {
+          tutorId: 'tutor_albert_flores',
+          sessionCount: 2,
+          scheduledAt: '2026-06-18T15:00:00.000Z',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Private booking checkout session created.',
+    schema: {
+      example: {
+        success: true,
+        message: 'Private checkout session created successfully',
+        data: {
+          payment: {
+            id: 'payment_private_01',
+            userId: 'student_jacob_jones',
+            tutorId: 'tutor_albert_flores',
+            courseId: null,
+            amount: 240,
+            currency: 'usd',
+            status: 'PENDING',
+            type: 'PRIVATE',
+            payoutStatus: 'PENDING',
+            privateLessonStartsAt: '2026-06-18T15:00:00.000Z',
+            privateLessonDuration: 120,
+            privateLessonSessions: 2,
+            stripeSessionId: 'cs_test_private_123',
+            createdAt: '2026-06-15T10:00:00.000Z',
+            updatedAt: '2026-06-15T10:00:00.000Z',
+          },
+          sessionId: 'cs_test_private_123',
+          url: 'https://checkout.stripe.com/c/pay/cs_test_private_123',
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Invalid request.' })
+  @ApiResponse({ status: 401, description: 'Unauthorized.' })
+  createPrivateBookingCheckoutSession(
+    @CurrentUser() user: { userId: string },
+    @Body() dto: CreatePrivateBookingCheckoutSessionDto,
+  ) {
+    return this.paymentService.createPrivateCheckoutSession(user.userId, dto);
+  }
 
   @Post('create-checkout-session')
   @UseGuards(AuthGuard, RolesGuard)
@@ -130,6 +257,25 @@ export class PaymentController {
     @Headers('stripe-signature') signature?: string,
   ) {
     return this.paymentService.handleWebhook(req.rawBody, signature);
+  }
+
+  @Get('checkout/success')
+  @Redirect()
+  @ApiOperation({
+    summary: 'Stripe Checkout success redirect and payment sync',
+    description:
+      'Stripe redirects here after checkout. The backend verifies the Checkout Session with Stripe, marks the payment paid when Stripe reports paid, then redirects to the frontend success page.',
+  })
+  @ApiQuery({
+    name: 'session_id',
+    required: true,
+    description: 'Stripe Checkout Session ID',
+    example: 'cs_test_123',
+  })
+  async handleCheckoutSuccessRedirect(
+    @Query('session_id') sessionId: string,
+  ) {
+    return this.paymentService.handleCheckoutSuccessRedirect(sessionId);
   }
 
   @Get('my')

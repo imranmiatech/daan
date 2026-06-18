@@ -16,7 +16,11 @@ import {
 import Stripe = require('stripe');
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AgoraService } from '../agora/agora.service';
-import { CreateCheckoutSessionDto } from './dto/create-payment.dto';
+import {
+  CreateCheckoutSessionDto,
+  CreateGroupClassCheckoutSessionDto,
+  CreatePrivateBookingCheckoutSessionDto,
+} from './dto/create-payment.dto';
 
 type TutorDashboardTransactionQuery = {
   page?: number;
@@ -96,13 +100,22 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (isPrivatePayment) {
-      return this.createPrivateCheckoutSession(userId, dto);
+      return this.createPrivateCheckoutSession(userId, {
+        tutorId: dto.tutorId!,
+        sessionCount: dto.sessionCount,
+        scheduledAt: dto.scheduledAt,
+      });
     }
 
-    if (!dto.courseId) {
-      throw new BadRequestException('courseId is required for group payment');
-    }
+    return this.createGroupClassCheckoutSession(userId, {
+      courseId: dto.courseId!,
+    });
+  }
 
+  async createGroupClassCheckoutSession(
+    userId: string,
+    dto: CreateGroupClassCheckoutSessionDto,
+  ) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, email: true, role: true },
@@ -178,7 +191,8 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:5173';
+    const frontendUrl = this.getFrontendUrl();
+    const backendUrl = this.getBackendUrl();
     const session = await this.stripe.checkout.sessions.create({
       mode: 'payment',
       customer_email: user.email,
@@ -201,7 +215,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
         userId,
         type: PaymentType.GROUP,
       },
-      success_url: `${frontendUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `${backendUrl}/payment/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${frontendUrl}/payment/cancel`,
     });
 
@@ -221,14 +235,10 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private async createPrivateCheckoutSession(
+  async createPrivateCheckoutSession(
     userId: string,
-    dto: CreateCheckoutSessionDto,
+    dto: CreatePrivateBookingCheckoutSessionDto,
   ) {
-    if (!dto.tutorId) {
-      throw new BadRequestException('tutorId is required for private payment');
-    }
-
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, email: true, role: true },
@@ -299,7 +309,8 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:5173';
+    const frontendUrl = this.getFrontendUrl();
+    const backendUrl = this.getBackendUrl();
     const session = await this.stripe.checkout.sessions.create({
       mode: 'payment',
       customer_email: user.email,
@@ -324,7 +335,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
         durationMinutes: String(durationMinutes),
         ...(scheduledAt && { scheduledAt: scheduledAt.toISOString() }),
       },
-      success_url: `${frontendUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `${backendUrl}/payment/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${frontendUrl}/payment/cancel`,
     });
 
@@ -472,6 +483,71 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
         enrolled,
         courseId: syncedPayment?.courseId ?? payment.courseId,
       },
+    };
+  }
+
+  async handleCheckoutSuccessRedirect(sessionId?: string) {
+    const frontendUrl = this.getFrontendUrl();
+
+    if (!sessionId) {
+      return {
+        url: `${frontendUrl}/payment/cancel?reason=missing_session`,
+        statusCode: 302,
+      };
+    }
+
+    const session = await this.stripe.checkout.sessions.retrieve(sessionId);
+    const payment = await this.prisma.payment.findFirst({
+      where: {
+        stripeSessionId: session.id,
+      },
+      select: {
+        id: true,
+        courseId: true,
+        status: true,
+        type: true,
+      },
+    });
+
+    if (!payment) {
+      return {
+        url: `${frontendUrl}/payment/cancel?reason=payment_not_found&session_id=${encodeURIComponent(session.id)}`,
+        statusCode: 302,
+      };
+    }
+
+    if (session.payment_status === 'paid') {
+      await this.handleCheckoutCompleted(session);
+    } else if (session.status === 'expired') {
+      await this.updatePaymentFromSession(session, PaymentStatus.CANCELLED);
+    }
+
+    const syncedPayment = await this.prisma.payment.findUnique({
+      where: {
+        id: payment.id,
+      },
+      select: {
+        id: true,
+        courseId: true,
+        status: true,
+        type: true,
+      },
+    });
+
+    const query = new URLSearchParams({
+      session_id: session.id,
+      payment_id: payment.id,
+      status: syncedPayment?.status ?? payment.status,
+      type: syncedPayment?.type ?? payment.type,
+    });
+
+    if (syncedPayment?.courseId) {
+      query.set('course_id', syncedPayment.courseId);
+    }
+
+    return {
+      url: `${frontendUrl}/payment/success?${query.toString()}`,
+      statusCode: 302,
     };
   }
 
@@ -1099,6 +1175,8 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     tutorId: string,
     query: TutorPrivateLessonsQuery,
   ) {
+    await this.syncPendingPrivateCheckoutSessions({ tutorId });
+
     const page = Math.max(1, query.page || 1);
     const limit = Math.min(Math.max(1, query.limit || 10), 100);
     const skip = (page - 1) * limit;
@@ -1131,7 +1209,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     };
 
     if (requestedStatus === 'upcoming') {
-      where.status = PaymentStatus.PENDING;
+      where.status = { in: [PaymentStatus.PENDING, PaymentStatus.PAID] };
     }
 
     if (requestedStatus === 'cancelled') {
@@ -1227,6 +1305,8 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
   }
 
   async findStudentPrivateLessons(studentId: string, query: PrivateLessonQuery) {
+    await this.syncPendingPrivateCheckoutSessions({ studentId });
+
     const page = Math.max(1, query.page || 1);
     const limit = Math.min(Math.max(1, query.limit || 10), 100);
     const skip = (page - 1) * limit;
@@ -1476,7 +1556,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       });
     }
 
-    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:5173';
+    const frontendUrl = this.getFrontendUrl();
     const accountLink = await this.stripe.accountLinks.create({
       account: stripeAccountId,
       refresh_url: `${frontendUrl}/tutor/settings/payment?connect=refresh`,
@@ -1629,6 +1709,61 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       where: { id: payment.id },
       data: { status },
     });
+  }
+
+  private async syncPendingPrivateCheckoutSessions(input: {
+    studentId?: string;
+    tutorId?: string;
+  }) {
+    if (!input.studentId && !input.tutorId) {
+      return;
+    }
+
+    const payments = await this.prisma.payment.findMany({
+      where: {
+        type: PaymentType.PRIVATE,
+        status: PaymentStatus.PENDING,
+        stripeSessionId: {
+          not: null,
+        },
+        ...(input.studentId && { userId: input.studentId }),
+        ...(input.tutorId && { tutorId: input.tutorId }),
+      },
+      select: {
+        id: true,
+        stripeSessionId: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 25,
+    });
+
+    for (const payment of payments) {
+      if (!payment.stripeSessionId) {
+        continue;
+      }
+
+      try {
+        const session = await this.stripe.checkout.sessions.retrieve(
+          payment.stripeSessionId,
+        );
+
+        if (session.payment_status === 'paid') {
+          await this.handleCheckoutCompleted(session);
+        } else if (session.status === 'expired') {
+          await this.updatePaymentFromSession(
+            session,
+            PaymentStatus.CANCELLED,
+          );
+        }
+      } catch (error) {
+        console.error(
+          `Failed to sync Stripe checkout session for payment ${payment.id}`,
+          error,
+        );
+      }
+    }
   }
 
   async processDuePayouts(limit = 25) {
@@ -1965,6 +2100,21 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       commissionRate: Number(process.env.PLATFORM_COMMISSION_RATE ?? 0.2),
       holdHours: Number(process.env.PAYOUT_HOLD_HOURS ?? 48),
     };
+  }
+
+  private getFrontendUrl() {
+    return (process.env.FRONTEND_URL ?? 'http://localhost:5173').replace(
+      /\/$/,
+      '',
+    );
+  }
+
+  private getBackendUrl() {
+    return (
+      process.env.BACKEND_URL ??
+      process.env.API_URL ??
+      'http://localhost:3000'
+    ).replace(/\/$/, '');
   }
 
   private calculateCommission(amount: number) {

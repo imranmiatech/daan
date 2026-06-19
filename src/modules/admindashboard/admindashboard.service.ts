@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   ApplicationStatus,
   PaymentStatus,
@@ -98,6 +102,73 @@ export class AdminDashboardService {
         status,
       },
       data: users,
+    };
+  }
+
+  async updateUserRole(userId: string, role: Role) {
+    const user = await this.prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: {
+        id: userId,
+      },
+      data: {
+        role,
+      },
+      select: this.userListSelect(),
+    });
+
+    return {
+      success: true,
+      message: `User role updated to ${role} successfully`,
+      data: updatedUser,
+    };
+  }
+
+  async deleteUser(userId: string, adminUserId: string) {
+    if (userId === adminUserId) {
+      throw new BadRequestException(
+        'You cannot delete your own account from the admin dashboard',
+      );
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        role: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    await this.prisma.user.delete({
+      where: {
+        id: userId,
+      },
+    });
+
+    return {
+      success: true,
+      message: 'User deleted successfully',
+      data: user,
     };
   }
 
@@ -263,6 +334,20 @@ export class AdminDashboardService {
         },
       },
     };
+  }
+
+  async approveTutorProfile(profileId: string) {
+    return this.updateTutorApplicationStatus(
+      profileId,
+      ApplicationStatus.APPROVED,
+    );
+  }
+
+  async rejectTutorProfile(profileId: string) {
+    return this.updateTutorApplicationStatus(
+      profileId,
+      ApplicationStatus.REJECTED,
+    );
   }
 
   async getRevenueOverview() {

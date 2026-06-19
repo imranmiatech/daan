@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -15,7 +16,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser, Roles } from '../auth/decorators/roles.decorator';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { AdminDashboardService } from './admindashboard.service';
@@ -23,7 +24,7 @@ import { AdminBookingManagementQueryDto } from './dto/admin-booking-management-q
 import { AdminPaymentOverviewQueryDto } from './dto/admin-payment-overview-query.dto';
 import { AdminPayoutManagementQueryDto } from './dto/admin-payout-management-query.dto';
 import { TutorStatusQueryDto } from './dto/tutor-status-query.dto';
-import { UpdateTutorApplicationStatusDto } from './dto/update-tutor-application-status.dto';
+import { UpdateRoleDto } from '../users/dto/update-role.dto';
 
 @ApiTags('Admin Dashboard')
 @Controller('admindashboard')
@@ -59,6 +60,33 @@ export class AdminDashboardController {
     return this.adminDashboardService.getUsersByRole(Role.STUDENT);
   }
 
+  @Patch('users/:id/role')
+  @ApiOperation({
+    summary: 'Update user role from admin dashboard',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'User role updated successfully.',
+  })
+  updateUserRole(@Param('id') id: string, @Body() dto: UpdateRoleDto) {
+    return this.adminDashboardService.updateUserRole(id, dto.role);
+  }
+
+  @Delete('users/:id')
+  @ApiOperation({
+    summary: 'Delete user from admin dashboard',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'User deleted successfully.',
+  })
+  deleteUser(
+    @Param('id') id: string,
+    @CurrentUser() admin: { userId: string },
+  ) {
+    return this.adminDashboardService.deleteUser(id, admin.userId);
+  }
+
   @Get('tutor-applications')
   @ApiOperation({
     summary: 'Get pending and rejected tutor users for admin dashboard',
@@ -67,18 +95,28 @@ export class AdminDashboardController {
     return this.adminDashboardService.getTutorApplications();
   }
 
-  @Patch('profiles/:profileId/status')
+  @Patch('tutor-profiles/:profileId/approve')
   @ApiOperation({
-    summary: 'Update tutor application status by profile id',
+    summary: 'Approve tutor profile application',
   })
-  updateTutorApplicationStatus(
-    @Param('profileId') profileId: string,
-    @Body() dto: UpdateTutorApplicationStatusDto,
-  ) {
-    return this.adminDashboardService.updateTutorApplicationStatus(
-      profileId,
-      dto.status,
-    );
+  @ApiResponse({
+    status: 200,
+    description: 'Tutor profile approved successfully.',
+  })
+  approveTutorProfile(@Param('profileId') profileId: string) {
+    return this.adminDashboardService.approveTutorProfile(profileId);
+  }
+
+  @Patch('tutor-profiles/:profileId/reject')
+  @ApiOperation({
+    summary: 'Reject tutor profile application',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Tutor profile rejected successfully.',
+  })
+  rejectTutorProfile(@Param('profileId') profileId: string) {
+    return this.adminDashboardService.rejectTutorProfile(profileId);
   }
 
   @Get('profiles/:profileId')

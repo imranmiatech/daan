@@ -12,7 +12,13 @@ import {
   Role,
 } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { getTimedClassStatus } from '../common/time/lesson-status.util';
 import { AdminBookingManagementQueryDto } from './dto/admin-booking-management-query.dto';
+import {
+  AdminGroupClassDetailQueryDto,
+  AdminGroupClassesQueryDto,
+  AdminGroupClassStatusFilter,
+} from './dto/admin-group-classes-query.dto';
 import { AdminPaymentOverviewQueryDto } from './dto/admin-payment-overview-query.dto';
 import { AdminPayoutManagementQueryDto } from './dto/admin-payout-management-query.dto';
 import { TutorStatusFilter } from './dto/tutor-status-query.dto';
@@ -25,6 +31,30 @@ type AdminBookingPayment = Prisma.PaymentGetPayload<{
         time: true;
         timeZone: true;
         classDuration: true;
+      };
+    };
+  };
+}>;
+
+type AdminGroupCourse = Prisma.CourseGetPayload<{
+  include: {
+    tutor: {
+      select: {
+        id: true;
+        fullName: true;
+        email: true;
+      };
+    };
+    curriculumItems: {
+      select: {
+        title: true;
+        date: true;
+        time: true;
+      };
+    };
+    _count: {
+      select: {
+        enrollments: true;
       };
     };
   };
@@ -364,6 +394,312 @@ export class AdminDashboardService {
     };
   }
 
+  async getGroupClasses(query: AdminGroupClassesQueryDto) {
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(Math.max(1, query.limit ?? 10), 100);
+    const search = query.search?.trim();
+    const status = query.status ?? 'all';
+    const category = query.category?.trim();
+    const teacherId = query.teacherId?.trim();
+
+    const where: Prisma.CourseWhereInput = {
+      ...(teacherId && { tutorId: teacherId }),
+      ...(category && category !== 'all' && { category }),
+      ...(search && {
+        OR: [
+          { title: { contains: search, mode: 'insensitive' } },
+          { category: { contains: search, mode: 'insensitive' } },
+          {
+            tutor: {
+              fullName: { contains: search, mode: 'insensitive' },
+            },
+          },
+          {
+            tutor: {
+              email: { contains: search, mode: 'insensitive' },
+            },
+          },
+        ],
+      }),
+    };
+
+    const [courses, categories, teachers] = await Promise.all([
+      this.prisma.course.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        include: this.adminGroupCourseInclude(),
+      }),
+      this.prisma.course.findMany({
+        distinct: ['category'],
+        orderBy: { category: 'asc' },
+        select: { category: true },
+      }),
+      this.prisma.user.findMany({
+        where: {
+          role: Role.TUTOR,
+          courses: { some: {} },
+        },
+        orderBy: { fullName: 'asc' },
+        select: { id: true, fullName: true, email: true },
+      }),
+    ]);
+
+    const revenueByCourse = await this.getCourseRevenueMap(
+      courses.map((course) => course.id),
+    );
+    const rows = courses
+      .map((course) => this.mapAdminGroupCourse(course, revenueByCourse))
+      .filter((course) => this.matchesAdminGroupStatus(course.status, status));
+    const total = rows.length;
+    const skip = (page - 1) * limit;
+    const paginatedRows = rows.slice(skip, skip + limit);
+    const meta = this.buildPaginationMeta(
+      page,
+      limit,
+      total,
+      paginatedRows.length,
+    );
+
+    return {
+      success: true,
+      data: {
+        title: 'Group Classes',
+        subtitle: 'Manage group learning sessions and classes.',
+        classes: paginatedRows,
+        filters: {
+          search: search ?? null,
+          status,
+          category: category ?? 'all',
+          teacherId: teacherId ?? 'all',
+          options: {
+            statuses: [
+              { label: 'All Status', value: 'all' },
+              { label: 'Active', value: 'active' },
+              { label: 'Upcoming', value: 'upcoming' },
+              { label: 'Live', value: 'live' },
+              { label: 'Completed', value: 'completed' },
+            ],
+            categories: [
+              { label: 'All Category', value: 'all' },
+              ...categories.map((item) => ({
+                label: item.category,
+                value: item.category,
+              })),
+            ],
+            teachers: [
+              { label: 'All Teacher', value: 'all' },
+              ...teachers.map((teacher) => ({
+                label: teacher.fullName,
+                value: teacher.id,
+                email: teacher.email,
+              })),
+            ],
+          },
+        },
+        meta: {
+          ...meta,
+          showingLabel: `Showing ${meta.from} to ${meta.to} of ${meta.total} classes`,
+        },
+      },
+    };
+  }
+
+  async getGroupClassById(
+    courseId: string,
+    query: AdminGroupClassDetailQueryDto = {},
+  ) {
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(Math.max(1, query.limit ?? 10), 100);
+    const search = query.search?.trim();
+
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId },
+      include: {
+        ...this.adminGroupCourseInclude(),
+        resources: {
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    if (!course) {
+      throw new NotFoundException('Group class not found');
+    }
+
+    const revenueByCourse = await this.getCourseRevenueMap([course.id]);
+    const summary = this.mapAdminGroupCourse(course, revenueByCourse);
+    const studentWhere: Prisma.CourseEnrollmentWhereInput = {
+      courseId,
+      ...(search && {
+        student: {
+          OR: [
+            { fullName: { contains: search, mode: 'insensitive' } },
+            { email: { contains: search, mode: 'insensitive' } },
+          ],
+        },
+      }),
+    };
+    const [totalStudents, enrollments] = await Promise.all([
+      this.prisma.courseEnrollment.count({ where: studentWhere }),
+      this.prisma.courseEnrollment.findMany({
+        where: studentWhere,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          student: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              profile: {
+                select: { avatarUrl: true },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+    const meta = this.buildPaginationMeta(
+      page,
+      limit,
+      totalStudents,
+      enrollments.length,
+    );
+
+    return {
+      success: true,
+      data: {
+        backLink: '/admindashboard/group-classes',
+        course: {
+          id: course.id,
+          title: course.title,
+          description: course.description,
+          image: course.image,
+          category: course.category,
+          language: course.language,
+          classDuration: course.classDuration,
+          pricePerStudent: course.pricePerStudent,
+          minStudent: course.minStudent,
+          maxStudent: course.maxStudent,
+          enrollmentDeadline: course.enrollmentDeadline,
+          startDate: course.startDate,
+          time: course.time,
+          timeZone: course.timeZone,
+          status: summary.status,
+          statusLabel: summary.statusLabel,
+        },
+        teacher: summary.teacher,
+        cards: {
+          teacher: summary.teacher,
+          enrolledStudents: {
+            value: summary.studentCount,
+            label: String(summary.studentCount),
+          },
+          totalRevenue: {
+            value: summary.revenue,
+            label: summary.revenueLabel,
+          },
+        },
+        lessons: this.getAdminCourseLessonItems(course),
+        enrolledStudents: enrollments.map((enrollment) => ({
+          enrollmentId: enrollment.id,
+          studentId: enrollment.student.id,
+          studentName: enrollment.student.fullName,
+          studentEmail: enrollment.student.email,
+          studentAvatarUrl: enrollment.student.profile?.avatarUrl ?? null,
+          enrolledAt: enrollment.createdAt,
+          enrolledAtLabel: this.formatFullDate(enrollment.createdAt),
+          enrolledTimeLabel: this.formatClockTime(enrollment.createdAt),
+          student: {
+            id: enrollment.student.id,
+            name: enrollment.student.fullName,
+            email: enrollment.student.email,
+            avatarUrl: enrollment.student.profile?.avatarUrl ?? null,
+          },
+          actions: {
+            delete: `/admindashboard/group-classes/${course.id}/students/${enrollment.student.id}`,
+          },
+        })),
+        resources: course.resources,
+        filters: {
+          search: search ?? null,
+        },
+        meta: {
+          ...meta,
+          showingLabel: `Showing ${meta.from} to ${meta.to} of ${meta.total} users`,
+        },
+      },
+    };
+  }
+
+  async deleteGroupClassStudent(courseId: string, studentId: string) {
+    const enrollment = await this.prisma.courseEnrollment.findUnique({
+      where: {
+        courseId_studentId: {
+          courseId,
+          studentId,
+        },
+      },
+      select: {
+        id: true,
+        courseId: true,
+        studentId: true,
+      },
+    });
+
+    if (!enrollment) {
+      throw new NotFoundException('Enrollment not found');
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.curriculumProgress.deleteMany({
+        where: { courseId, studentId },
+      }),
+      this.prisma.courseCompletion.deleteMany({
+        where: { courseId, studentId },
+      }),
+      this.prisma.studentLessonState.deleteMany({
+        where: { courseId, studentId },
+      }),
+      this.prisma.courseEnrollment.delete({
+        where: {
+          courseId_studentId: {
+            courseId,
+            studentId,
+          },
+        },
+      }),
+    ]);
+
+    return {
+      success: true,
+      message: 'Student removed from group class successfully',
+      data: enrollment,
+    };
+  }
+
+  async deleteGroupClass(courseId: string) {
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId },
+      select: { id: true, title: true },
+    });
+
+    if (!course) {
+      throw new NotFoundException('Group class not found');
+    }
+
+    await this.prisma.course.delete({
+      where: { id: courseId },
+    });
+
+    return {
+      success: true,
+      message: 'Group class deleted successfully',
+      data: course,
+    };
+  }
+
   async getPaymentOverview(query: AdminPaymentOverviewQueryDto) {
     const page = Math.max(1, query.page ?? 1);
     const limit = Math.min(Math.max(1, query.limit ?? 10), 100);
@@ -513,7 +849,8 @@ export class AdminDashboardService {
         })),
         filteredSummary: {
           totalRevenue: filteredTotalRevenue._sum.amount ?? 0,
-          commissionRevenue: filteredCommissionRevenue._sum.commissionAmount ?? 0,
+          commissionRevenue:
+            filteredCommissionRevenue._sum.commissionAmount ?? 0,
         },
         filters: {
           search: search ?? null,
@@ -592,7 +929,8 @@ export class AdminDashboardService {
         title: 'Payout Management',
         subtitle: 'Manage teacher payouts and payment processing.',
         payouts: payouts.map((payment) => {
-          const date = payment.paidOutAt ?? payment.holdUntil ?? payment.createdAt;
+          const date =
+            payment.paidOutAt ?? payment.holdUntil ?? payment.createdAt;
 
           return {
             payoutId: payment.id,
@@ -606,9 +944,12 @@ export class AdminDashboardService {
             grossAmount: payment.amount,
             grossAmountLabel: this.formatCurrency(payment.amount),
             commissionAmount: payment.commissionAmount,
-            commissionAmountLabel: this.formatCurrency(payment.commissionAmount),
+            commissionAmountLabel: this.formatCurrency(
+              payment.commissionAmount,
+            ),
             currency: payment.currency,
-            method: payment.tutor.paymentInfo?.paymentMethod ?? 'Stripe Connect',
+            method:
+              payment.tutor.paymentInfo?.paymentMethod ?? 'Stripe Connect',
             date,
             dateLabel: this.formatFullDate(date),
             status: payment.payoutStatus,
@@ -779,6 +1120,204 @@ export class AdminDashboardService {
         },
       },
     };
+  }
+
+  private adminGroupCourseInclude() {
+    return {
+      tutor: {
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+        },
+      },
+      curriculumItems: {
+        orderBy: [{ date: 'asc' }, { time: 'asc' }, { id: 'asc' }],
+        select: {
+          title: true,
+          date: true,
+          time: true,
+        },
+      },
+      _count: {
+        select: {
+          enrollments: true,
+        },
+      },
+    } satisfies Prisma.CourseInclude;
+  }
+
+  private async getCourseRevenueMap(courseIds: string[]) {
+    if (courseIds.length === 0) {
+      return new Map<string, number>();
+    }
+
+    const revenueRows = await this.prisma.payment.groupBy({
+      by: ['courseId'],
+      where: {
+        courseId: { in: courseIds },
+        type: PaymentType.GROUP,
+        status: PaymentStatus.PAID,
+      },
+      _sum: {
+        amount: true,
+      },
+    });
+
+    return new Map(
+      revenueRows
+        .filter((row) => row.courseId)
+        .map((row) => [row.courseId!, row._sum.amount ?? 0]),
+    );
+  }
+
+  private mapAdminGroupCourse(
+    course: AdminGroupCourse,
+    revenueByCourse: Map<string, number>,
+  ) {
+    const revenue = revenueByCourse.get(course.id) ?? 0;
+    const status = this.getAdminGroupCourseStatus(course);
+
+    return {
+      courseId: course.id,
+      courseName: course.title,
+      teacher: {
+        id: course.tutor.id,
+        name: course.tutor.fullName,
+        email: course.tutor.email,
+      },
+      category: course.category,
+      studentCount: course._count.enrollments,
+      studentLabel: String(course._count.enrollments),
+      revenue,
+      revenueLabel: this.formatCurrency(revenue),
+      status,
+      statusLabel: this.formatAdminGroupCourseStatus(status),
+      actions: {
+        view: `/admindashboard/group-classes/${course.id}`,
+        delete: `/admindashboard/group-classes/${course.id}`,
+      },
+      createdAt: course.createdAt,
+      updatedAt: course.updatedAt,
+    };
+  }
+
+  private getAdminGroupCourseStatus(
+    course: Pick<
+      AdminGroupCourse,
+      'startDate' | 'time' | 'classDuration' | 'curriculums' | 'curriculumItems'
+    >,
+  ): AdminGroupClassStatusFilter {
+    const lessons = this.getAdminCourseLessonItems(course);
+
+    if (lessons.length === 0) {
+      return 'upcoming';
+    }
+
+    if (lessons.some((lesson) => lesson.status === 'live')) {
+      return 'live';
+    }
+
+    if (lessons.some((lesson) => lesson.status === 'upcoming')) {
+      return 'upcoming';
+    }
+
+    return 'completed';
+  }
+
+  private matchesAdminGroupStatus(
+    status: AdminGroupClassStatusFilter,
+    filter: AdminGroupClassStatusFilter,
+  ) {
+    if (filter === 'all') {
+      return true;
+    }
+
+    if (filter === 'active') {
+      return status === 'upcoming' || status === 'live';
+    }
+
+    return status === filter;
+  }
+
+  private formatAdminGroupCourseStatus(status: AdminGroupClassStatusFilter) {
+    const labels: Record<AdminGroupClassStatusFilter, string> = {
+      all: 'All',
+      active: 'Active',
+      upcoming: 'Upcoming',
+      live: 'Live',
+      completed: 'Completed',
+    };
+
+    return labels[status];
+  }
+
+  private getAdminCourseLessonItems(
+    course: Pick<
+      AdminGroupCourse,
+      'startDate' | 'time' | 'classDuration' | 'curriculums' | 'curriculumItems'
+    >,
+  ) {
+    const sourceItems =
+      course.curriculumItems.length > 0
+        ? course.curriculumItems
+        : course.curriculums.map((title, index) => ({
+            title,
+            date: new Date(
+              course.startDate.getTime() + index * 24 * 60 * 60 * 1000,
+            ),
+            time: course.time,
+          }));
+
+    return sourceItems.map((item, index) => {
+      const startsAt = this.combineDateAndTime(new Date(item.date), item.time);
+      const endsAt = new Date(
+        startsAt.getTime() + course.classDuration * 60 * 1000,
+      );
+      const status = getTimedClassStatus(startsAt, endsAt);
+
+      return {
+        index,
+        title: item.title,
+        date: item.date,
+        time: item.time,
+        startsAt,
+        endsAt,
+        status,
+      };
+    });
+  }
+
+  private combineDateAndTime(date: Date, time: string) {
+    const combined = new Date(date);
+    const parsed = this.parseTime(time);
+
+    if (parsed) {
+      combined.setHours(parsed.hours, parsed.minutes, 0, 0);
+    }
+
+    return combined;
+  }
+
+  private parseTime(time: string) {
+    const match = time.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+
+    if (!match) {
+      return null;
+    }
+
+    let hours = Number(match[1]);
+    const minutes = Number(match[2] ?? 0);
+    const meridiem = match[3]?.toLowerCase();
+
+    if (meridiem === 'pm' && hours < 12) hours += 12;
+    if (meridiem === 'am' && hours === 12) hours = 0;
+
+    if (hours > 23 || minutes > 59) {
+      return null;
+    }
+
+    return { hours, minutes };
   }
 
   private async buildCards() {
@@ -1081,46 +1620,42 @@ export class AdminDashboardService {
   }
 
   private async buildPaymentOverviewSummary() {
-    const [
-      totalRevenue,
-      paidRevenue,
-      pendingPayments,
-      completedPayouts,
-    ] = await Promise.all([
-      this.prisma.payment.aggregate({
-        where: {
-          status: PaymentStatus.PAID,
-        },
-        _sum: {
-          amount: true,
-        },
-      }),
-      this.prisma.payment.aggregate({
-        where: {
-          status: PaymentStatus.PAID,
-        },
-        _sum: {
-          commissionAmount: true,
-        },
-      }),
-      this.prisma.payment.aggregate({
-        where: {
-          status: PaymentStatus.PENDING,
-        },
-        _sum: {
-          amount: true,
-        },
-      }),
-      this.prisma.payment.aggregate({
-        where: {
-          status: PaymentStatus.PAID,
-          payoutStatus: PayoutStatus.PAID,
-        },
-        _sum: {
-          tutorAmount: true,
-        },
-      }),
-    ]);
+    const [totalRevenue, paidRevenue, pendingPayments, completedPayouts] =
+      await Promise.all([
+        this.prisma.payment.aggregate({
+          where: {
+            status: PaymentStatus.PAID,
+          },
+          _sum: {
+            amount: true,
+          },
+        }),
+        this.prisma.payment.aggregate({
+          where: {
+            status: PaymentStatus.PAID,
+          },
+          _sum: {
+            commissionAmount: true,
+          },
+        }),
+        this.prisma.payment.aggregate({
+          where: {
+            status: PaymentStatus.PENDING,
+          },
+          _sum: {
+            amount: true,
+          },
+        }),
+        this.prisma.payment.aggregate({
+          where: {
+            status: PaymentStatus.PAID,
+            payoutStatus: PayoutStatus.PAID,
+          },
+          _sum: {
+            tutorAmount: true,
+          },
+        }),
+      ]);
 
     const totalRevenueAmount = totalRevenue._sum.amount ?? 0;
     const commissionRevenue = paidRevenue._sum.commissionAmount ?? 0;
@@ -1258,6 +1793,13 @@ export class AdminDashboardService {
     const date = new Date();
     date.setHours(hour, minute, 0, 0);
 
+    return date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  }
+
+  private formatClockTime(date: Date) {
     return date.toLocaleTimeString('en-US', {
       hour: 'numeric',
       minute: '2-digit',

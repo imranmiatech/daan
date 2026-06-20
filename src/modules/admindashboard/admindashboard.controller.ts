@@ -21,6 +21,10 @@ import { AuthGuard } from '../auth/guards/auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { AdminDashboardService } from './admindashboard.service';
 import { AdminBookingManagementQueryDto } from './dto/admin-booking-management-query.dto';
+import {
+  AdminGroupClassDetailQueryDto,
+  AdminGroupClassesQueryDto,
+} from './dto/admin-group-classes-query.dto';
 import { AdminPaymentOverviewQueryDto } from './dto/admin-payment-overview-query.dto';
 import { AdminPayoutManagementQueryDto } from './dto/admin-payout-management-query.dto';
 import { TutorStatusQueryDto } from './dto/tutor-status-query.dto';
@@ -135,6 +139,73 @@ export class AdminDashboardController {
   @ApiOperation({ summary: 'Get admin dashboard user joining chart' })
   getUserJoining() {
     return this.adminDashboardService.getUserJoining();
+  }
+
+  @Get('group-classes')
+  @ApiOperation({
+    summary: 'Get admin group classes table with search and filters',
+  })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 10 })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    example: 'Advanced Mathematics',
+    description: 'Search by course name, teacher name, email, or category.',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['all', 'active', 'upcoming', 'live', 'completed'],
+    example: 'all',
+  })
+  @ApiQuery({
+    name: 'category',
+    required: false,
+    example: 'Mathematics',
+  })
+  @ApiQuery({
+    name: 'teacherId',
+    required: false,
+    example: 'tutor_albert_flores',
+  })
+  getGroupClasses(@Query() query: AdminGroupClassesQueryDto) {
+    return this.adminDashboardService.getGroupClasses(query);
+  }
+
+  @Get('group-classes/:courseId')
+  @ApiOperation({ summary: 'Get admin group class detail' })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 10 })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    example: 'Albert',
+    description: 'Search enrolled students by name or email.',
+  })
+  getGroupClassById(
+    @Param('courseId') courseId: string,
+    @Query() query: AdminGroupClassDetailQueryDto,
+  ) {
+    return this.adminDashboardService.getGroupClassById(courseId, query);
+  }
+
+  @Delete('group-classes/:courseId/students/:studentId')
+  @ApiOperation({ summary: 'Remove enrolled student from admin group class' })
+  deleteGroupClassStudent(
+    @Param('courseId') courseId: string,
+    @Param('studentId') studentId: string,
+  ) {
+    return this.adminDashboardService.deleteGroupClassStudent(
+      courseId,
+      studentId,
+    );
+  }
+
+  @Delete('group-classes/:courseId')
+  @ApiOperation({ summary: 'Delete group class from admin dashboard' })
+  deleteGroupClass(@Param('courseId') courseId: string) {
+    return this.adminDashboardService.deleteGroupClass(courseId);
   }
 
   @Get('payment-overview')

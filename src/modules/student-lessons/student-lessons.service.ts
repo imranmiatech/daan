@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import { AgoraService } from '../agora/agora.service';
+import { getTimedClassStatus } from '../common/time/lesson-status.util';
 import {
   StudentLessonQueryDto,
   StudentLessonReviewDto,
@@ -117,7 +118,7 @@ export class StudentLessonsService {
   async getJoinPreview(studentId: string, lessonId: string) {
     const lesson = await this.assertStudentLesson(studentId, lessonId);
 
-    if (lesson.status === 'completed' || lesson.status === 'cancelled') {
+    if (lesson.status !== 'live') {
       throw new BadRequestException('This lesson cannot be joined');
     }
 
@@ -151,7 +152,7 @@ export class StudentLessonsService {
   async joinLesson(studentId: string, lessonId: string) {
     const lesson = await this.assertStudentLesson(studentId, lessonId);
 
-    if (lesson.status === 'completed' || lesson.status === 'cancelled') {
+    if (lesson.status !== 'live') {
       throw new BadRequestException('This lesson cannot be joined');
     }
 
@@ -394,7 +395,7 @@ export class StudentLessonsService {
         timeLabel: this.formatTimeRange(startsAt, endsAt),
         durationMinutes: course.classDuration,
         status,
-        joinAvailable: status === 'live' || status === 'upcoming',
+        joinAvailable: status === 'live',
         review,
       };
     });
@@ -423,27 +424,14 @@ export class StudentLessonsService {
   }
 
   private getLessonStatus(startsAt: Date, endsAt: Date): LessonStatus {
-    const now = new Date();
-
-    if (now >= startsAt && now <= endsAt) {
-      return 'live';
-    }
-
-    if (now > endsAt) {
-      return 'completed';
-    }
-
-    return 'upcoming';
+    return getTimedClassStatus(startsAt, endsAt);
   }
 
   private getLessonKey(courseId: string, curriculumIndex: number) {
     return `${courseId}:${curriculumIndex}`;
   }
 
-  private getLessonStartAt(
-    courseStartDate: Date,
-    courseTime: string,
-  ) {
+  private getLessonStartAt(courseStartDate: Date, courseTime: string) {
     const date = new Date(courseStartDate);
     const parsedTime = this.parseTime(courseTime);
 

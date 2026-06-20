@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PaymentStatus, PaymentType, Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { getTimedClassStatusByDuration } from '../common/time/lesson-status.util';
 
 type DashboardLesson = {
   id: string;
@@ -67,14 +68,19 @@ export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getStudentHome(studentId: string) {
-    const [overview, nextLesson, todaySchedule, learningProgress, recentActivity] =
-      await Promise.all([
-        this.getStudentOverviewData(studentId),
-        this.getStudentNextLessonData(studentId),
-        this.getStudentTodayScheduleData(studentId),
-        this.getStudentLearningProgressData(studentId),
-        this.getStudentRecentActivityData(studentId),
-      ]);
+    const [
+      overview,
+      nextLesson,
+      todaySchedule,
+      learningProgress,
+      recentActivity,
+    ] = await Promise.all([
+      this.getStudentOverviewData(studentId),
+      this.getStudentNextLessonData(studentId),
+      this.getStudentTodayScheduleData(studentId),
+      this.getStudentLearningProgressData(studentId),
+      this.getStudentRecentActivityData(studentId),
+    ]);
 
     return {
       success: true,
@@ -594,8 +600,10 @@ export class DashboardService {
     const now = new Date();
     const weekStart = this.startOfWeek(now);
     const nextWeekStart = this.addDays(weekStart, 7);
-    const { student, courses, lessons } =
-      await this.getStudentDashboardContext(studentId, now);
+    const { student, courses, lessons } = await this.getStudentDashboardContext(
+      studentId,
+      now,
+    );
     const learnedMinutes = lessons
       .filter((lesson) => lesson.isCompletedByStudent)
       .reduce((total, lesson) => total + lesson.durationMinutes, 0);
@@ -652,7 +660,9 @@ export class DashboardService {
     const { lessons } = await this.getStudentDashboardContext(studentId, now);
 
     return lessons
-      .filter((lesson) => lesson.date >= todayStart && lesson.date < tomorrowStart)
+      .filter(
+        (lesson) => lesson.date >= todayStart && lesson.date < tomorrowStart,
+      )
       .sort((a, b) => a.date.getTime() - b.date.getTime())
       .map((lesson) => this.mapStudentScheduleLesson(lesson));
   }
@@ -1147,19 +1157,7 @@ export class DashboardService {
     durationMinutes: number,
     now: Date,
   ): 'completed' | 'live' | 'upcoming' {
-    const lessonEnd = new Date(
-      lessonDate.getTime() + durationMinutes * 60 * 1000,
-    );
-
-    if (now >= lessonDate && now <= lessonEnd) {
-      return 'live';
-    }
-
-    if (now > lessonEnd) {
-      return 'completed';
-    }
-
-    return 'upcoming';
+    return getTimedClassStatusByDuration(lessonDate, durationMinutes, now);
   }
 
   private combineDateAndTime(date: Date, time: string) {

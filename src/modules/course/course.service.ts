@@ -94,7 +94,7 @@ export class CourseService {
     const course = await this.prisma.course.create({
       data: {
         ...courseDto,
-        curriculums: curriculumItems.map((item) => item.title),
+        curriculums: this.getCourseCurriculums(dto, curriculumItems),
         startDate: new Date(dto.startDate ?? curriculumItems[0].date),
         time: dto.time ?? curriculumItems[0].time,
         enrollmentDeadline: new Date(dto.enrollmentDeadline),
@@ -109,6 +109,7 @@ export class CourseService {
           },
         },
       },
+      include: this.getCourseMutationInclude(),
     });
 
     return {
@@ -190,7 +191,7 @@ export class CourseService {
       data: {
         ...courseDto,
         ...(curriculumItems && {
-          curriculums: curriculumItems.map((item) => item.title),
+          curriculums: this.getCourseCurriculums(dto, curriculumItems),
           startDate: new Date(dto.startDate ?? curriculumItems[0].date),
           time: dto.time ?? curriculumItems[0].time,
           curriculumItems: {
@@ -212,6 +213,7 @@ export class CourseService {
           enrollmentDeadline: new Date(dto.enrollmentDeadline),
         }),
       },
+      include: this.getCourseMutationInclude(),
     });
 
     return {
@@ -657,6 +659,14 @@ export class CourseService {
     } satisfies Prisma.CourseInclude;
   }
 
+  private getCourseMutationInclude() {
+    return {
+      curriculumItems: {
+        orderBy: [{ date: 'asc' }, { time: 'asc' }, { id: 'asc' }],
+      },
+    } satisfies Prisma.CourseInclude;
+  }
+
   private async assertTutorCourse(courseId: string, tutorId: string) {
     const course = await this.prisma.course.findUnique({
       where: {
@@ -757,6 +767,15 @@ export class CourseService {
         time: dto.time as string,
       };
     });
+  }
+
+  private getCourseCurriculums(
+    dto: CreateCourseDto,
+    curriculumItems: CreateCourseLessonDto[],
+  ) {
+    return dto.curriculums?.length
+      ? dto.curriculums
+      : curriculumItems.map((item) => item.title);
   }
 
   private getUpcomingStartDateFilter(

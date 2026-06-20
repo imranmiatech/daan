@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import { AgoraService } from '../agora/agora.service';
-import { getTimedClassStatus } from '../common/time/lesson-status.util';
+import {
+  combineDateAndTime,
+  getTimedClassStatus,
+} from '../common/time/lesson-status.util';
 import {
   StudentLessonQueryDto,
   StudentLessonReviewDto,
@@ -359,7 +362,11 @@ export class StudentLessonsService {
       : null;
 
     return lessonItems.map((item, curriculumIndex) => {
-      const startsAt = this.getLessonStartAt(item.date, item.time);
+      const startsAt = this.getLessonStartAt(
+        item.date,
+        item.time,
+        course.timeZone,
+      );
       const endsAt = new Date(
         startsAt.getTime() + course.classDuration * 60 * 1000,
       );
@@ -431,15 +438,12 @@ export class StudentLessonsService {
     return `${courseId}:${curriculumIndex}`;
   }
 
-  private getLessonStartAt(courseStartDate: Date, courseTime: string) {
-    const date = new Date(courseStartDate);
-    const parsedTime = this.parseTime(courseTime);
-
-    if (parsedTime) {
-      date.setHours(parsedTime.hours, parsedTime.minutes, 0, 0);
-    }
-
-    return date;
+  private getLessonStartAt(
+    courseStartDate: Date,
+    courseTime: string,
+    timeZone?: string | null,
+  ) {
+    return combineDateAndTime(new Date(courseStartDate), courseTime, timeZone);
   }
 
   private getCourseLessonItems(course: {

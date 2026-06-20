@@ -12,8 +12,10 @@ import {
   Role,
 } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
 import { getTimedClassStatus } from '../common/time/lesson-status.util';
 import { AdminBookingManagementQueryDto } from './dto/admin-booking-management-query.dto';
+import { UpsertAdminProfileDto } from './dto/admin-profile.dto';
 import {
   AdminGroupClassDetailQueryDto,
   AdminGroupClassesQueryDto,
@@ -62,7 +64,119 @@ type AdminGroupCourse = Prisma.CourseGetPayload<{
 
 @Injectable()
 export class AdminDashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {}
+
+  async getAdminProfile(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { adminProfile: true },
+    });
+
+    if (!user || user.role !== Role.ADMIN) {
+      throw new NotFoundException('Admin not found');
+    }
+
+    return {
+      success: true,
+      data: this.toAdminProfileResponse(user),
+    };
+  }
+
+  async upsertAdminProfile(
+    userId: string,
+    dto: UpsertAdminProfileDto,
+    files?: { avatarFile?: any },
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { adminProfile: true },
+    });
+
+    if (!user || user.role !== Role.ADMIN) {
+      throw new NotFoundException('Admin not found');
+    }
+
+    if (dto.email && dto.email !== user.email) {
+      const emailOwner = await this.prisma.user.findUnique({
+        where: { email: dto.email },
+        select: { id: true },
+      });
+
+      if (emailOwner && emailOwner.id !== userId) {
+        throw new BadRequestException('Email is already in use');
+      }
+    }
+
+    const avatarUpload = files?.avatarFile
+      ? await this.cloudinaryService.uploadFile(files.avatarFile, {
+          folder: 'daanklerk/admin-profiles',
+          resourceType: 'image',
+          allowedMimeTypes: [
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+            'image/gif',
+          ],
+          maxBytes: 5 * 1024 * 1024,
+        })
+      : null;
+
+    const firstName = dto.firstName ?? user.adminProfile?.firstName;
+    const lastName = dto.lastName ?? user.adminProfile?.lastName;
+    const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          ...(dto.email ? { email: dto.email } : {}),
+          ...(fullName ? { fullName } : {}),
+        },
+      });
+
+      return tx.adminProfile.upsert({
+        where: { userId },
+        update: {
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          phone: dto.phone,
+          avatarUrl: avatarUpload?.url ?? dto.avatarUrl,
+        },
+        create: {
+          userId,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          phone: dto.phone,
+          avatarUrl: avatarUpload?.url ?? dto.avatarUrl,
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              role: true,
+            },
+          },
+        },
+      });
+    });
+
+    return {
+      success: true,
+      message: 'Admin profile saved successfully',
+      data: this.toAdminProfileResponse({
+        id: updated.user.id,
+        fullName: updated.user.fullName,
+        email: updated.user.email,
+        role: updated.user.role,
+        adminProfile: updated,
+      }),
+    };
+  }
 
   async getHome() {
     const [cards, revenueOverview, userJoining] = await Promise.all([
@@ -1804,5 +1918,35 @@ export class AdminDashboardService {
       hour: 'numeric',
       minute: '2-digit',
     });
+  }
+
+  private toAdminProfileResponse(user: {
+    id: string;
+    fullName: string;
+    email: string;
+    role: Role;
+    adminProfile: {
+      id: string;
+      firstName: string | null;
+      lastName: string | null;
+      phone: string | null;
+      avatarUrl: string | null;
+      createdAt: Date;
+      updatedAt: Date;
+    } | null;
+  }) {
+    return {
+      id: user.adminProfile?.id ?? null,
+      userId: user.id,
+      fullName: user.fullName,
+      firstName: user.adminProfile?.firstName ?? null,
+      lastName: user.adminProfile?.lastName ?? null,
+      email: user.email,
+      phone: user.adminProfile?.phone ?? null,
+      avatarUrl: user.adminProfile?.avatarUrl ?? null,
+      role: user.role,
+      createdAt: user.adminProfile?.createdAt ?? null,
+      updatedAt: user.adminProfile?.updatedAt ?? null,
+    };
   }
 }

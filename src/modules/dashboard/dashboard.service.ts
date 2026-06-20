@@ -1,7 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PaymentStatus, PaymentType, Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { getTimedClassStatusByDuration } from '../common/time/lesson-status.util';
+import {
+  combineDateAndTime,
+  getTimedClassStatusByDuration,
+} from '../common/time/lesson-status.util';
 
 type DashboardLesson = {
   id: string;
@@ -20,6 +23,7 @@ type StudentCourse = {
   curriculums: string[];
   startDate: Date;
   time: string;
+  timeZone: string;
   classDuration: number;
   tutor: {
     id: string;
@@ -181,6 +185,7 @@ export class DashboardService {
           curriculums: true,
           startDate: true,
           time: true,
+          timeZone: true,
           classDuration: true,
         },
       }),
@@ -756,7 +761,8 @@ export class DashboardService {
             image: true,
             curriculums: true,
             startDate: true,
-            time: true,
+              time: true,
+              timeZone: true,
             classDuration: true,
             tutor: {
               select: {
@@ -969,6 +975,7 @@ export class DashboardService {
         curriculums: true,
         startDate: true,
         time: true,
+        timeZone: true,
         classDuration: true,
       },
     });
@@ -981,6 +988,7 @@ export class DashboardService {
       curriculums: string[];
       startDate: Date;
       time: string;
+      timeZone: string;
       classDuration: number;
     },
     now: Date,
@@ -988,7 +996,11 @@ export class DashboardService {
     return course.curriculums.map((title, index) => {
       const date = new Date(course.startDate);
       date.setDate(date.getDate() + index);
-      const lessonDate = this.combineDateAndTime(date, course.time);
+      const lessonDate = combineDateAndTime(
+        date,
+        course.time,
+        course.timeZone,
+      );
 
       return {
         id: `${course.id}-${index}`,
@@ -1158,17 +1170,6 @@ export class DashboardService {
     now: Date,
   ): 'completed' | 'live' | 'upcoming' {
     return getTimedClassStatusByDuration(lessonDate, durationMinutes, now);
-  }
-
-  private combineDateAndTime(date: Date, time: string) {
-    const combined = new Date(date);
-    const parsed = this.parseTime(time);
-
-    if (parsed) {
-      combined.setHours(parsed.hours, parsed.minutes, 0, 0);
-    }
-
-    return combined;
   }
 
   private parseTime(time: string) {

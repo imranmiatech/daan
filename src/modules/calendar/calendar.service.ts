@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { getTimedClassStatus } from '../common/time/lesson-status.util';
+import {
+  combineDateAndTime,
+  getTimedClassStatus,
+} from '../common/time/lesson-status.util';
 import { CalendarQueryDto } from './dto/calendar-query.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 
@@ -84,7 +87,11 @@ export class CalendarService {
           const date = new Date(course.startDate);
           date.setDate(date.getDate() + index);
 
-          const startsAt = this.combineDateAndTime(date, course.time);
+          const startsAt = combineDateAndTime(
+            date,
+            course.time,
+            course.timeZone,
+          );
           const endsAt = new Date(
             startsAt.getTime() + course.classDuration * 60 * 1000,
           );
@@ -244,7 +251,11 @@ export class CalendarService {
         const date = new Date(course.startDate);
         date.setDate(date.getDate() + index);
 
-        const startsAt = this.combineDateAndTime(date, course.time);
+        const startsAt = combineDateAndTime(
+          date,
+          course.time,
+          course.timeZone,
+        );
         const endsAt = new Date(
           startsAt.getTime() + course.classDuration * 60 * 1000,
         );
@@ -358,17 +369,6 @@ export class CalendarService {
     if (!student) {
       throw new ForbiddenException('Only students can access this calendar');
     }
-  }
-
-  private combineDateAndTime(date: Date, time: string) {
-    const combined = new Date(date);
-    const parsed = this.parseTime(time);
-
-    if (parsed) {
-      combined.setHours(parsed.hours, parsed.minutes, 0, 0);
-    }
-
-    return combined;
   }
 
   private parseTime(time: string) {

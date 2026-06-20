@@ -73,6 +73,7 @@ export class ClassesService {
         },
         startDate: true,
         time: true,
+        timeZone: true,
         classDuration: true,
         pricePerStudent: true,
         maxStudent: true,
@@ -831,12 +832,13 @@ export class ClassesService {
     startDate: Date;
     time: string;
     classDuration: number;
+    timeZone: string;
   }) {
     const lessonItems = this.getCourseLessonItems(course);
 
     return lessonItems.map((item, curriculumIndex) => {
       const date = new Date(item.date);
-      const startsAt = this.combineDateAndTime(date, item.time);
+      const startsAt = this.combineDateAndTime(date, item.time, course.timeZone);
       const endsAt = new Date(
         startsAt.getTime() + course.classDuration * 60 * 1000,
       );
@@ -871,12 +873,17 @@ export class ClassesService {
     startDate: Date;
     time: string;
     classDuration: number;
+    timeZone: string;
   }) {
     const lessonItems = this.getCourseLessonItems(course);
 
     return lessonItems.map((item, index) => {
       const date = new Date(item.date);
-      const lessonDate = this.combineDateAndTime(date, item.time);
+      const lessonDate = this.combineDateAndTime(
+        date,
+        item.time,
+        course.timeZone,
+      );
 
       return {
         id: `${course.id}-${index}`,
@@ -936,6 +943,7 @@ export class ClassesService {
         },
         startDate: true,
         time: true,
+        timeZone: true,
         classDuration: true,
       },
     });
@@ -946,7 +954,11 @@ export class ClassesService {
 
     return this.getCourseLessonItems(course).map((item, index) => {
       const date = new Date(item.date);
-      const lessonDate = this.combineDateAndTime(date, item.time);
+      const lessonDate = this.combineDateAndTime(
+        date,
+        item.time,
+        course.timeZone,
+      );
 
       return {
         id: `${courseId}-${index}`,
@@ -990,15 +1002,105 @@ export class ClassesService {
     return getTimedClassStatusByDuration(lessonDate, durationMinutes);
   }
 
-  private combineDateAndTime(date: Date, time: string) {
+  private combineDateAndTime(date: Date, time: string, timeZone?: string) {
     const combined = new Date(date);
     const parsed = this.parseTime(time);
 
-    if (parsed) {
-      combined.setHours(parsed.hours, parsed.minutes, 0, 0);
+    if (!parsed) {
+      return combined;
     }
 
+    if (timeZone) {
+      return this.getZonedDateTime(date, parsed.hours, parsed.minutes, timeZone);
+    }
+
+    combined.setHours(parsed.hours, parsed.minutes, 0, 0);
+
     return combined;
+  }
+
+  private getZonedDateTime(
+    date: Date,
+    hours: number,
+    minutes: number,
+    timeZone: string,
+  ) {
+    const target = {
+      year: date.getUTCFullYear(),
+      month: date.getUTCMonth() + 1,
+      day: date.getUTCDate(),
+      hours,
+      minutes,
+    };
+    let utcTime = Date.UTC(
+      target.year,
+      target.month - 1,
+      target.day,
+      target.hours,
+      target.minutes,
+      0,
+      0,
+    );
+
+    try {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const parts = this.getDatePartsInTimeZone(new Date(utcTime), timeZone);
+        const zonedTime = Date.UTC(
+          parts.year,
+          parts.month - 1,
+          parts.day,
+          parts.hours,
+          parts.minutes,
+          0,
+          0,
+        );
+        const targetTime = Date.UTC(
+          target.year,
+          target.month - 1,
+          target.day,
+          target.hours,
+          target.minutes,
+          0,
+          0,
+        );
+        const diff = zonedTime - targetTime;
+
+        if (diff === 0) {
+          break;
+        }
+
+        utcTime -= diff;
+      }
+
+      return new Date(utcTime);
+    } catch {
+      const combined = new Date(date);
+      combined.setHours(hours, minutes, 0, 0);
+      return combined;
+    }
+  }
+
+  private getDatePartsInTimeZone(date: Date, timeZone: string) {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    });
+    const parts = formatter.formatToParts(date);
+    const value = (type: Intl.DateTimeFormatPartTypes) =>
+      Number(parts.find((part) => part.type === type)?.value);
+
+    return {
+      year: value('year'),
+      month: value('month'),
+      day: value('day'),
+      hours: value('hour'),
+      minutes: value('minute'),
+    };
   }
 
   private getCourseLessonItems(course: {

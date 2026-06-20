@@ -13,7 +13,10 @@ import {
 } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
-import { getTimedClassStatus } from '../common/time/lesson-status.util';
+import {
+  combineDateAndTime,
+  getTimedClassStatusByDuration,
+} from '../common/time/lesson-status.util';
 import { AdminBookingManagementQueryDto } from './dto/admin-booking-management-query.dto';
 import { UpsertAdminProfileDto } from './dto/admin-profile.dto';
 import {
@@ -1319,7 +1322,13 @@ export class AdminDashboardService {
   private getAdminGroupCourseStatus(
     course: Pick<
       AdminGroupCourse,
-      'startDate' | 'time' | 'classDuration' | 'curriculums' | 'curriculumItems'
+      | 'startDate'
+      | 'time'
+      | 'timeZone'
+      | 'classDuration'
+      | 'courseDuration'
+      | 'curriculums'
+      | 'curriculumItems'
     >,
   ): AdminGroupClassStatusFilter {
     const lessons = this.getAdminCourseLessonItems(course);
@@ -1369,7 +1378,13 @@ export class AdminDashboardService {
   private getAdminCourseLessonItems(
     course: Pick<
       AdminGroupCourse,
-      'startDate' | 'time' | 'classDuration' | 'curriculums' | 'curriculumItems'
+      | 'startDate'
+      | 'time'
+      | 'timeZone'
+      | 'classDuration'
+      | 'courseDuration'
+      | 'curriculums'
+      | 'curriculumItems'
     >,
   ) {
     const sourceItems =
@@ -1384,11 +1399,14 @@ export class AdminDashboardService {
           }));
 
     return sourceItems.map((item, index) => {
-      const startsAt = this.combineDateAndTime(new Date(item.date), item.time);
-      const endsAt = new Date(
-        startsAt.getTime() + course.classDuration * 60 * 1000,
+      const startsAt = combineDateAndTime(
+        new Date(item.date),
+        item.time,
+        course.timeZone,
       );
-      const status = getTimedClassStatus(startsAt, endsAt);
+      const durationMinutes = this.getSessionDuration(course);
+      const endsAt = new Date(startsAt.getTime() + durationMinutes * 60 * 1000);
+      const status = getTimedClassStatusByDuration(startsAt, durationMinutes);
 
       return {
         index,
@@ -1397,9 +1415,17 @@ export class AdminDashboardService {
         time: item.time,
         startsAt,
         endsAt,
+        durationMinutes,
         status,
       };
     });
+  }
+
+  private getSessionDuration(course: {
+    courseDuration?: number | null;
+    classDuration: number;
+  }) {
+    return course.courseDuration ?? course.classDuration;
   }
 
   private combineDateAndTime(date: Date, time: string) {

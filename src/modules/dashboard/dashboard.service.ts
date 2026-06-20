@@ -25,6 +25,7 @@ type StudentCourse = {
   time: string;
   timeZone: string;
   classDuration: number;
+  courseDuration: number;
   tutor: {
     id: string;
     fullName: string;
@@ -187,6 +188,7 @@ export class DashboardService {
           time: true,
           timeZone: true,
           classDuration: true,
+          courseDuration: true,
         },
       }),
       this.prisma.payment.aggregate({
@@ -761,9 +763,10 @@ export class DashboardService {
             image: true,
             curriculums: true,
             startDate: true,
-              time: true,
-              timeZone: true,
+            time: true,
+            timeZone: true,
             classDuration: true,
+            courseDuration: true,
             tutor: {
               select: {
                 id: true,
@@ -818,7 +821,7 @@ export class DashboardService {
         email: course.tutor.email,
         image: course.tutor.profile?.avatarUrl ?? null,
       },
-      durationMinutes: course.classDuration,
+      durationMinutes: this.getSessionDuration(course),
       curriculumIndex: index,
       isCompletedByStudent: completedIndexes.has(index),
     }));
@@ -977,6 +980,7 @@ export class DashboardService {
         time: true,
         timeZone: true,
         classDuration: true,
+        courseDuration: true,
       },
     });
   }
@@ -990,17 +994,14 @@ export class DashboardService {
       time: string;
       timeZone: string;
       classDuration: number;
+      courseDuration: number;
     },
     now: Date,
   ): DashboardLesson[] {
     return course.curriculums.map((title, index) => {
       const date = new Date(course.startDate);
       date.setDate(date.getDate() + index);
-      const lessonDate = combineDateAndTime(
-        date,
-        course.time,
-        course.timeZone,
-      );
+      const lessonDate = combineDateAndTime(date, course.time, course.timeZone);
 
       return {
         id: `${course.id}-${index}`,
@@ -1009,7 +1010,11 @@ export class DashboardService {
         title,
         date: lessonDate,
         time: course.time,
-        status: this.getLessonStatus(lessonDate, course.classDuration, now),
+        status: this.getLessonStatus(
+          lessonDate,
+          this.getSessionDuration(course),
+          now,
+        ),
       };
     });
   }
@@ -1170,6 +1175,13 @@ export class DashboardService {
     now: Date,
   ): 'completed' | 'live' | 'upcoming' {
     return getTimedClassStatusByDuration(lessonDate, durationMinutes, now);
+  }
+
+  private getSessionDuration(course: {
+    courseDuration?: number | null;
+    classDuration: number;
+  }) {
+    return course.courseDuration ?? course.classDuration;
   }
 
   private parseTime(time: string) {

@@ -78,6 +78,7 @@ export class ClassesService {
         time: true,
         timeZone: true,
         classDuration: true,
+        courseDuration: true,
         pricePerStudent: true,
         maxStudent: true,
         _count: {
@@ -250,8 +251,8 @@ export class ClassesService {
           },
           enrolledAt: enrollment.createdAt,
           studentCount: course._count.enrollments,
-          durationMinutes: course.classDuration,
-          durationLabel: `${course.classDuration} min`,
+          durationMinutes: course.courseDuration,
+          durationLabel: `${course.courseDuration} min`,
           progress: {
             completedSessions,
             totalSessions,
@@ -793,6 +794,7 @@ export class ClassesService {
         time: true,
         timeZone: true,
         classDuration: true,
+        courseDuration: true,
       },
     });
 
@@ -835,6 +837,7 @@ export class ClassesService {
     startDate: Date;
     time: string;
     classDuration: number;
+    courseDuration: number;
     timeZone: string;
   }) {
     const lessonItems = this.getCourseLessonItems(course);
@@ -842,10 +845,9 @@ export class ClassesService {
     return lessonItems.map((item, curriculumIndex) => {
       const date = new Date(item.date);
       const startsAt = combineDateAndTime(date, item.time, course.timeZone);
-      const endsAt = new Date(
-        startsAt.getTime() + course.classDuration * 60 * 1000,
-      );
-      const status = this.getLessonStatus(startsAt, course.classDuration);
+      const durationMinutes = this.getSessionDuration(course);
+      const endsAt = new Date(startsAt.getTime() + durationMinutes * 60 * 1000);
+      const status = this.getLessonStatus(startsAt, durationMinutes);
 
       return {
         id: `${course.id}:${curriculumIndex}`,
@@ -857,7 +859,7 @@ export class ClassesService {
         time: item.time,
         dateLabel: this.formatDate(date),
         timeLabel: this.formatTime(startsAt),
-        durationMinutes: course.classDuration,
+        durationMinutes,
         status,
         joinAvailable: status === 'live',
       };
@@ -876,25 +878,23 @@ export class ClassesService {
     startDate: Date;
     time: string;
     classDuration: number;
+    courseDuration: number;
     timeZone: string;
   }) {
     const lessonItems = this.getCourseLessonItems(course);
 
     return lessonItems.map((item, index) => {
       const date = new Date(item.date);
-      const lessonDate = combineDateAndTime(
-        date,
-        item.time,
-        course.timeZone,
-      );
+      const lessonDate = combineDateAndTime(date, item.time, course.timeZone);
+      const durationMinutes = this.getSessionDuration(course);
 
       return {
         id: `${course.id}-${index}`,
         title: item.title || `Session ${index + 1}`,
         date,
         time: item.time,
-        durationMinutes: course.classDuration,
-        status: this.getLessonStatus(lessonDate, course.classDuration),
+        durationMinutes,
+        status: this.getLessonStatus(lessonDate, durationMinutes),
       };
     });
   }
@@ -948,6 +948,7 @@ export class ClassesService {
         time: true,
         timeZone: true,
         classDuration: true,
+        courseDuration: true,
       },
     });
 
@@ -957,19 +958,16 @@ export class ClassesService {
 
     return this.getCourseLessonItems(course).map((item, index) => {
       const date = new Date(item.date);
-      const lessonDate = combineDateAndTime(
-        date,
-        item.time,
-        course.timeZone,
-      );
+      const lessonDate = combineDateAndTime(date, item.time, course.timeZone);
+      const durationMinutes = this.getSessionDuration(course);
 
       return {
         id: `${courseId}-${index}`,
         title: item.title,
         date,
         time: item.time,
-        durationMinutes: course.classDuration,
-        status: this.getLessonStatus(lessonDate, course.classDuration),
+        durationMinutes,
+        status: this.getLessonStatus(lessonDate, durationMinutes),
       };
     });
   }
@@ -1003,6 +1001,13 @@ export class ClassesService {
 
   private getLessonStatus(lessonDate: Date, durationMinutes: number) {
     return getTimedClassStatusByDuration(lessonDate, durationMinutes);
+  }
+
+  private getSessionDuration(course: {
+    courseDuration?: number | null;
+    classDuration: number;
+  }) {
+    return course.courseDuration ?? course.classDuration;
   }
 
   private getCourseLessonItems(course: {

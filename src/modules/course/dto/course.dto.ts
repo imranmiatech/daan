@@ -3,13 +3,28 @@ import {
   IsArray,
   IsDateString,
   IsEnum,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
   Min,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
+
+function toMinuteNumber(value: unknown) {
+  if (typeof value === 'number') {
+    return value;
+  }
+
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const match = value.trim().match(/^(\d+)\s*(m|min|mins|minute|minutes)?$/i);
+
+  return match ? Number(match[1]) : Number(value);
+}
 
 export class CreateCourseLessonDto {
   @IsString()
@@ -82,15 +97,17 @@ export class CreateCourseDto {
   @IsString()
   timeZone!: string;
 
-  @IsNumber()
+  @IsInt()
   @Min(1)
+  @Transform(({ value }) => toMinuteNumber(value))
   classDuration!: number;
 
   @IsString()
   language!: string;
 
-  @IsNumber()
+  @IsInt()
   @Min(1)
+  @Transform(({ value }) => toMinuteNumber(value))
   courseDuration!: number;
 
   @IsNumber()

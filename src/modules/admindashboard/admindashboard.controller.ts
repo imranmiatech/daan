@@ -5,21 +5,29 @@ import {
   Get,
   Param,
   Patch,
+  Post,
   Query,
+  UploadedFiles,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import {
+  ApiBody,
   ApiBearerAuth,
+  ApiConsumes,
   ApiOperation,
   ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { Role } from '@prisma/client';
 import { CurrentUser, Roles } from '../auth/decorators/roles.decorator';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { AdminDashboardService } from './admindashboard.service';
+import { UpsertAdminProfileDto } from './dto/admin-profile.dto';
 import { AdminBookingManagementQueryDto } from './dto/admin-booking-management-query.dto';
 import {
   AdminGroupClassDetailQueryDto,
@@ -37,6 +45,66 @@ import { UpdateRoleDto } from '../users/dto/update-role.dto';
 @ApiBearerAuth()
 export class AdminDashboardController {
   constructor(private readonly adminDashboardService: AdminDashboardService) {}
+
+  @Get('profile')
+  @ApiOperation({ summary: 'Get logged-in admin profile info' })
+  getAdminProfile(@CurrentUser() admin: { userId: string }) {
+    return this.adminDashboardService.getAdminProfile(admin.userId);
+  }
+
+  @Post('profile')
+  @UseInterceptors(
+    FileFieldsInterceptor([{ name: 'avatarFile', maxCount: 1 }], {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
+  @ApiOperation({
+    summary: 'Create or update logged-in admin profile info',
+  })
+  @ApiConsumes('application/json', 'multipart/form-data')
+  @ApiBody({
+    required: false,
+    description:
+      'Use application/json for avatarUrl, or multipart/form-data when uploading avatarFile.',
+    schema: {
+      type: 'object',
+      properties: {
+        firstName: { type: 'string', example: 'Istiaq' },
+        lastName: { type: 'string', example: 'Turjo' },
+        email: { type: 'string', example: 'ia.turjo18@gmail.com' },
+        phone: { type: 'string', example: '+880 1777 327 280' },
+        avatarUrl: {
+          type: 'string',
+          example: 'https://example.com/admin-avatar.jpg',
+        },
+        avatarFile: {
+          type: 'string',
+          format: 'binary',
+          description: 'Optional admin profile image.',
+        },
+      },
+      example: {
+        firstName: 'Istiaq',
+        lastName: 'Turjo',
+        email: 'ia.turjo18@gmail.com',
+        phone: '+880 1777 327 280',
+        avatarUrl: 'https://example.com/admin-avatar.jpg',
+      },
+    },
+  })
+  upsertAdminProfile(
+    @CurrentUser() admin: { userId: string },
+    @Body() dto: UpsertAdminProfileDto,
+    @UploadedFiles()
+    files?: {
+      avatarFile?: any[];
+    },
+  ) {
+    return this.adminDashboardService.upsertAdminProfile(admin.userId, dto, {
+      avatarFile: files?.avatarFile?.[0],
+    });
+  }
 
   @Get('home')
   @ApiOperation({ summary: 'Get admin dashboard home page data' })

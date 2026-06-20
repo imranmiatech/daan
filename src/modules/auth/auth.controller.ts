@@ -20,9 +20,7 @@ import {
   ForgotPasswordDto,
   ForgotPasswordResponseDto,
   LoginDto,
-  LoginResponseDto,
   RegisterDto,
-  RegisterResponseDto,
   ResetPasswordDto,
   ResetPasswordResponseDto,
 } from './dto/auth.dto';
@@ -38,7 +36,23 @@ export class AuthController {
   @ApiResponse({
     status: 201,
     description: 'User registered successfully.',
-    type: RegisterResponseDto,
+    schema: {
+      example: {
+        success: true,
+        message: 'Registration successful',
+        data: {
+          id: '5f5b9d3b-6e9f-4b08-8df0-1014a4c62f2d',
+          fullName: 'John Doe',
+          email: 'john.doe@example.com',
+          role: 'STUDENT',
+          isEmailVerified: false,
+          profile: {
+            id: 'a87e387c-3b91-4d1a-82dc-304bfa4d89a7',
+            applicationStatus: 'APPROVED',
+          },
+        },
+      },
+    },
   })
   register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
@@ -48,7 +62,24 @@ export class AuthController {
   @ApiResponse({
     status: 200,
     description: 'User successfully logged in.',
-    type: LoginResponseDto,
+    schema: {
+      example: {
+        success: true,
+        message: 'Login successful',
+        accessToken: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+        refreshToken: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+        user: {
+          id: '5f5b9d3b-6e9f-4b08-8df0-1014a4c62f2d',
+          fullName: 'John Doe',
+          email: 'john.doe@example.com',
+          role: 'STUDENT',
+          profile: {
+            id: 'a87e387c-3b91-4d1a-82dc-304bfa4d89a7',
+            applicationStatus: 'APPROVED',
+          },
+        },
+      },
+    },
   })
   async login(
     @Body() loginDto: LoginDto,

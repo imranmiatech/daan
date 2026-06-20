@@ -42,6 +42,15 @@ export class ProfileService {
       availability,
     } = dto;
 
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
     const availabilityData = this.mapAvailability(availability);
     const uploadedFiles = await this.uploadProfileFiles(files);
     const finalAvatarUrl = uploadedFiles.avatarUrl ?? avatarUrl;

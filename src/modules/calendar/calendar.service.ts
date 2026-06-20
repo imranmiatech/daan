@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { getTimedClassStatus } from '../common/time/lesson-status.util';
 import { CalendarQueryDto } from './dto/calendar-query.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 
@@ -115,7 +116,7 @@ export class CalendarService {
             durationHours: Number((course.classDuration / 60).toFixed(2)),
             status,
             cancellationReason: state?.reason ?? null,
-            joinAvailable: status === 'live' || status === 'upcoming',
+            joinAvailable: status === 'live',
           };
         });
       })
@@ -402,17 +403,7 @@ export class CalendarService {
   }
 
   private getEventStatus(startsAt: Date, endsAt: Date): CalendarEventStatus {
-    const now = new Date();
-
-    if (now >= startsAt && now <= endsAt) {
-      return 'live';
-    }
-
-    if (now > endsAt) {
-      return 'completed';
-    }
-
-    return 'upcoming';
+    return getTimedClassStatus(startsAt, endsAt);
   }
 
   private formatIsoDate(date: Date) {

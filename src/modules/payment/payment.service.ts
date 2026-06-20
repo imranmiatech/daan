@@ -16,6 +16,7 @@ import {
 import Stripe = require('stripe');
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AgoraService } from '../agora/agora.service';
+import { getTimedClassStatus } from '../common/time/lesson-status.util';
 import {
   CreateCheckoutSessionDto,
   CreateGroupClassCheckoutSessionDto,
@@ -1304,7 +1305,10 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async findStudentPrivateLessons(studentId: string, query: PrivateLessonQuery) {
+  async findStudentPrivateLessons(
+    studentId: string,
+    query: PrivateLessonQuery,
+  ) {
     await this.syncPendingPrivateCheckoutSessions({ studentId });
 
     const page = Math.max(1, query.page || 1);
@@ -1752,10 +1756,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
         if (session.payment_status === 'paid') {
           await this.handleCheckoutCompleted(session);
         } else if (session.status === 'expired') {
-          await this.updatePaymentFromSession(
-            session,
-            PaymentStatus.CANCELLED,
-          );
+          await this.updatePaymentFromSession(session, PaymentStatus.CANCELLED);
         }
       } catch (error) {
         console.error(
@@ -1914,7 +1915,10 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     return this.serializePrivateLesson(payment);
   }
 
-  private async getPrivateLessonForStudent(studentId: string, paymentId: string) {
+  private async getPrivateLessonForStudent(
+    studentId: string,
+    paymentId: string,
+  ) {
     const payment = await this.getPrivateLessonPayment({
       paymentId,
       studentId,
@@ -2014,9 +2018,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
     const durationMinutes =
       payment.privateLessonDuration ?? sessionCount * defaultDurationMinutes;
     const startsAt = payment.privateLessonStartsAt ?? payment.createdAt;
-    const endsAt = new Date(
-      startsAt.getTime() + durationMinutes * 60 * 1000,
-    );
+    const endsAt = new Date(startsAt.getTime() + durationMinutes * 60 * 1000);
     const status = this.getPrivateLessonStatus(
       payment.status,
       startsAt,
@@ -2068,11 +2070,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('Private lesson payment is not paid');
     }
 
-    if (input.lesson.status === 'completed') {
-      throw new BadRequestException('This private lesson is already completed');
-    }
-
-    if (input.lesson.status === 'cancelled') {
+    if (input.lesson.status !== 'live') {
       throw new BadRequestException('This private lesson cannot be joined');
     }
 
@@ -2164,7 +2162,8 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       const paymentMonth = payment.createdAt.getMonth();
 
       if (payment.createdAt.getFullYear() === now.getFullYear()) {
-        totals[paymentMonth].amount += payment.tutorAmount ?? payment.amount ?? 0;
+        totals[paymentMonth].amount +=
+          payment.tutorAmount ?? payment.amount ?? 0;
       }
     }
 
@@ -2310,17 +2309,7 @@ export class PaymentService implements OnModuleInit, OnModuleDestroy {
       return 'upcoming';
     }
 
-    const now = new Date();
-
-    if (paymentStatus === PaymentStatus.PAID && now < startsAt) {
-      return 'upcoming';
-    }
-
-    if (paymentStatus === PaymentStatus.PAID && now <= endsAt) {
-      return 'live';
-    }
-
-    return 'completed';
+    return getTimedClassStatus(startsAt, endsAt);
   }
 
   private formatDuration(minutes: number) {

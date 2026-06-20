@@ -8,6 +8,7 @@ import {
 import { PaymentStatus, PaymentType, Prisma, Role } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AgoraService } from '../agora/agora.service';
+import { getTimedClassStatusByDuration } from '../common/time/lesson-status.util';
 import {
   ClassStudentsQueryDto,
   CreateClassResourceDto,
@@ -603,8 +604,8 @@ export class ClassesService {
     await this.assertTutorCourse(tutorId, courseId);
     const lesson = await this.getCourseLesson(courseId, curriculumIndex);
 
-    if (lesson.status === 'completed') {
-      throw new BadRequestException('This lesson is already completed');
+    if (lesson.status !== 'live') {
+      throw new BadRequestException('This lesson is not live yet');
     }
 
     const enrolledStudents = await this.prisma.courseEnrollment.count({
@@ -652,8 +653,8 @@ export class ClassesService {
     await this.assertTutorCourse(tutorId, courseId);
     const lesson = await this.getCourseLesson(courseId, curriculumIndex);
 
-    if (lesson.status === 'completed') {
-      throw new BadRequestException('This lesson is already completed');
+    if (lesson.status !== 'live') {
+      throw new BadRequestException('This lesson is not live yet');
     }
 
     const channelName = this.agoraService.buildChannelName(
@@ -853,7 +854,7 @@ export class ClassesService {
         timeLabel: this.formatTime(startsAt),
         durationMinutes: course.classDuration,
         status,
-        joinAvailable: status === 'live' || status === 'upcoming',
+        joinAvailable: status === 'live',
       };
     });
   }
@@ -986,20 +987,7 @@ export class ClassesService {
   }
 
   private getLessonStatus(lessonDate: Date, durationMinutes: number) {
-    const now = new Date();
-    const lessonEnd = new Date(
-      lessonDate.getTime() + durationMinutes * 60 * 1000,
-    );
-
-    if (now >= lessonDate && now <= lessonEnd) {
-      return 'live';
-    }
-
-    if (now > lessonEnd) {
-      return 'completed';
-    }
-
-    return 'upcoming';
+    return getTimedClassStatusByDuration(lessonDate, durationMinutes);
   }
 
   private combineDateAndTime(date: Date, time: string) {

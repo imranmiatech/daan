@@ -15,8 +15,10 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import {
   LiveClassRoomPayloadDto,
   ShareLiveClassResourceDto,
+  ShareLiveClassResourceUploadDto,
   WsShareLiveClassResourceDto,
 } from './dto/live-class-message.dto';
+import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
 
 type CurrentUser = {
   userId: string;
@@ -46,7 +48,10 @@ const MESSAGE_TYPE = {
 
 @Injectable()
 export class LiveClassMessageService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {}
 
   async getGroupMessages(
     user: CurrentUser,
@@ -89,11 +94,12 @@ export class LiveClassMessageService {
     user: CurrentUser,
     courseId: string,
     curriculumIndex: number,
-    dto: ShareLiveClassResourceDto | WsShareLiveClassResourceDto,
+    dto: ShareLiveClassResourceUploadDto,
+    file: any,
   ) {
     await this.assertGroupAccess(user, courseId, curriculumIndex);
 
-    return this.createResourceMessage(
+    return this.createUploadedResourceMessage(
       user.userId,
       {
         roomType: ROOM_TYPE.GROUP,
@@ -101,6 +107,7 @@ export class LiveClassMessageService {
         curriculumIndex,
       },
       dto,
+      file,
     );
   }
 
@@ -140,17 +147,19 @@ export class LiveClassMessageService {
   async sharePrivateResource(
     user: CurrentUser,
     paymentId: string,
-    dto: ShareLiveClassResourceDto | WsShareLiveClassResourceDto,
+    dto: ShareLiveClassResourceUploadDto,
+    file: any,
   ) {
     await this.assertPrivateAccess(user, paymentId);
 
-    return this.createResourceMessage(
+    return this.createUploadedResourceMessage(
       user.userId,
       {
         roomType: ROOM_TYPE.PRIVATE,
         paymentId,
       },
       dto,
+      file,
     );
   }
 
@@ -267,6 +276,56 @@ export class LiveClassMessageService {
       },
       select: this.messageSelect(),
     });
+  }
+
+  private async createUploadedResourceMessage(
+    senderId: string,
+    target: LiveClassTarget,
+    dto: ShareLiveClassResourceUploadDto,
+    file: any,
+  ) {
+    const upload = await this.uploadLiveClassResourceFile(file);
+
+    return this.prisma.liveClassMessage.create({
+      data: {
+        ...this.targetData(target),
+        senderId,
+        messageType: MESSAGE_TYPE.RESOURCE,
+        content: dto.content?.trim() || null,
+        resourceName: upload.originalName,
+        resourceUrl: upload.url,
+        resourceMimeType: upload.mimeType,
+        resourceSize: this.formatBytes(upload.bytes),
+      },
+      select: this.messageSelect(),
+    });
+  }
+
+  private uploadLiveClassResourceFile(file: any) {
+    return this.cloudinaryService.uploadFile(file, {
+      folder: 'daanklerk/live-class-resources',
+      resourceType: 'auto',
+      allowedMimeTypes: [
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'image/gif',
+        'application/pdf',
+      ],
+      maxBytes: 20 * 1024 * 1024,
+    });
+  }
+
+  private formatBytes(bytes: number) {
+    if (bytes < 1024) {
+      return `${bytes} B`;
+    }
+
+    if (bytes < 1024 * 1024) {
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    }
+
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   }
 
   private async assertAccess(user: CurrentUser, target: LiveClassTarget) {

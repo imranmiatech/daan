@@ -6,14 +6,20 @@ import {
   ParseIntPipe,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import {
+  ApiBody,
   ApiBearerAuth,
+  ApiConsumes,
   ApiOperation,
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { Role } from '@prisma/client';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { CurrentUser } from '../auth/decorators/roles.decorator';
@@ -22,7 +28,7 @@ import { LiveClassMessageService } from './live-class-message.service';
 import {
   LiveClassMessageQueryDto,
   SendLiveClassMessageDto,
-  ShareLiveClassResourceDto,
+  ShareLiveClassResourceUploadDto,
 } from './dto/live-class-message.dto';
 
 @ApiTags('Live Class Messages')
@@ -84,20 +90,46 @@ export class LiveClassMessageController {
   }
 
   @Post('group/:courseId/lessons/:index/resources')
-  @ApiOperation({ summary: 'Share resource in group live class' })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 20 * 1024 * 1024 },
+    }),
+  )
+  @ApiOperation({ summary: 'Share file resource in group live class' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'Required image or PDF file. Supported: JPEG, PNG, WebP, GIF, PDF. Max 20MB.',
+        },
+        content: {
+          type: 'string',
+          example: 'Please download this before the exercise.',
+        },
+      },
+    },
+  })
   @ApiParam({ name: 'courseId', example: 'course_advanced_math_101' })
   @ApiParam({ name: 'index', example: 0 })
   async shareGroupResource(
     @CurrentUser() user: { userId: string; role: Role },
     @Param('courseId') courseId: string,
     @Param('index', ParseIntPipe) index: number,
-    @Body() dto: ShareLiveClassResourceDto,
+    @Body() dto: ShareLiveClassResourceUploadDto,
+    @UploadedFile() file: any,
   ) {
     const message = await this.liveClassMessageService.shareGroupResource(
       user,
       courseId,
       index,
       dto,
+      file,
     );
     this.liveClassMessageGateway.emitMessage(
       `live-class:group:${courseId}:${index}`,
@@ -154,17 +186,43 @@ export class LiveClassMessageController {
   }
 
   @Post('private/:paymentId/resources')
-  @ApiOperation({ summary: 'Share resource in private live class' })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 20 * 1024 * 1024 },
+    }),
+  )
+  @ApiOperation({ summary: 'Share file resource in private live class' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'Required image or PDF file. Supported: JPEG, PNG, WebP, GIF, PDF. Max 20MB.',
+        },
+        content: {
+          type: 'string',
+          example: 'Use this for today lesson.',
+        },
+      },
+    },
+  })
   @ApiParam({ name: 'paymentId', example: 'payment_private_01' })
   async sharePrivateResource(
     @CurrentUser() user: { userId: string; role: Role },
     @Param('paymentId') paymentId: string,
-    @Body() dto: ShareLiveClassResourceDto,
+    @Body() dto: ShareLiveClassResourceUploadDto,
+    @UploadedFile() file: any,
   ) {
     const message = await this.liveClassMessageService.sharePrivateResource(
       user,
       paymentId,
       dto,
+      file,
     );
     this.liveClassMessageGateway.emitMessage(
       `live-class:private:${paymentId}`,

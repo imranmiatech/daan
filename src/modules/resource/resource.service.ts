@@ -5,14 +5,14 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
+import { S3StorageService } from '../common/s3/s3.service';
 import { CreateResourceDto, UpdateResourceDto } from './dto/resource.dto';
 
 @Injectable()
 export class ResourceService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly cloudinaryService: CloudinaryService,
+    private readonly s3StorageService: S3StorageService,
   ) {}
 
   async createResource(tutorId: string, dto: CreateResourceDto, file?: any) {
@@ -141,7 +141,7 @@ export class ResourceService {
   }
 
   private uploadResourceFile(file: any) {
-    return this.cloudinaryService.uploadFile(file, {
+    return this.s3StorageService.uploadFile(file, {
       folder: 'daanklerk/resources',
       resourceType: 'raw',
       allowedMimeTypes: [

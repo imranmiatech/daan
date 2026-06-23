@@ -64,7 +64,7 @@ export class ResourceController {
         file: {
           type: 'string',
           format: 'binary',
-          description: 'Optional PDF/document file. If sent, url is saved as Cloudinary URL.',
+          description: 'Optional PDF/document file. If sent, url is saved as an S3 URL.',
         },
       },
     },
@@ -117,7 +117,7 @@ export class ResourceController {
         file: {
           type: 'string',
           format: 'binary',
-          description: 'Optional PDF/document file. If sent, url is updated with Cloudinary URL.',
+          description: 'Optional PDF/document file. If sent, url is updated with an S3 URL.',
         },
       },
     },

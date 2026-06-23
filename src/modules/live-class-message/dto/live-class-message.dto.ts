@@ -68,6 +68,13 @@ export class ShareLiveClassResourceDto {
   content?: string;
 }
 
+export class ShareLiveClassResourceUploadDto {
+  @ApiPropertyOptional({ example: 'Please download this before the exercise.' })
+  @IsOptional()
+  @IsString()
+  content?: string;
+}
+
 export class LiveClassRoomPayloadDto {
   @ApiProperty({ enum: ['GROUP', 'PRIVATE'], example: 'GROUP' })
   @IsIn(['GROUP', 'PRIVATE'])

@@ -16,11 +16,18 @@ type DashboardLesson = {
   status: 'completed' | 'live' | 'upcoming';
 };
 
+type CourseLessonItem = {
+  title: string;
+  date: Date;
+  time: string;
+};
+
 type StudentCourse = {
   id: string;
   title: string;
   image: string | null;
   curriculums: string[];
+  curriculumItems?: CourseLessonItem[];
   startDate: Date;
   time: string;
   timeZone: string;
@@ -762,6 +769,14 @@ export class DashboardService {
             title: true,
             image: true,
             curriculums: true,
+            curriculumItems: {
+              orderBy: [{ date: 'asc' }, { time: 'asc' }, { id: 'asc' }],
+              select: {
+                title: true,
+                date: true,
+                time: true,
+              },
+            },
             startDate: true,
             time: true,
             timeZone: true,
@@ -976,6 +991,14 @@ export class DashboardService {
         id: true,
         title: true,
         curriculums: true,
+        curriculumItems: {
+          orderBy: [{ date: 'asc' }, { time: 'asc' }, { id: 'asc' }],
+          select: {
+            title: true,
+            date: true,
+            time: true,
+          },
+        },
         startDate: true,
         time: true,
         timeZone: true,
@@ -990,6 +1013,7 @@ export class DashboardService {
       id: string;
       title: string;
       curriculums: string[];
+      curriculumItems?: CourseLessonItem[];
       startDate: Date;
       time: string;
       timeZone: string;
@@ -998,23 +1022,51 @@ export class DashboardService {
     },
     now: Date,
   ): DashboardLesson[] {
-    return course.curriculums.map((title, index) => {
-      const date = new Date(course.startDate);
-      date.setDate(date.getDate() + index);
-      const lessonDate = combineDateAndTime(date, course.time, course.timeZone);
+    const lessonItems = this.getCourseLessonItems(course);
+
+    return lessonItems.map((item, index) => {
+      const date = new Date(item.date);
+      const lessonDate = combineDateAndTime(date, item.time, course.timeZone);
 
       return {
         id: `${course.id}-${index}`,
         courseId: course.id,
         courseTitle: course.title,
-        title,
+        title: item.title,
         date: lessonDate,
-        time: course.time,
+        time: item.time,
         status: this.getLessonStatus(
           lessonDate,
           this.getSessionDuration(course),
           now,
         ),
+      };
+    });
+  }
+
+  private getCourseLessonItems(course: {
+    title: string;
+    curriculums: string[];
+    curriculumItems?: CourseLessonItem[];
+    startDate: Date;
+    time: string;
+  }) {
+    if (course.curriculumItems?.length) {
+      return course.curriculumItems;
+    }
+
+    const lessonTitles = course.curriculums.length
+      ? course.curriculums
+      : [course.title];
+
+    return lessonTitles.map((title, index) => {
+      const date = new Date(course.startDate);
+      date.setDate(date.getDate() + index);
+
+      return {
+        title,
+        date,
+        time: course.time,
       };
     });
   }
@@ -1181,7 +1233,7 @@ export class DashboardService {
     courseDuration?: number | null;
     classDuration: number;
   }) {
-    return course.courseDuration ?? course.classDuration;
+    return course.classDuration;
   }
 
   private parseTime(time: string) {

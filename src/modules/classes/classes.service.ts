@@ -259,9 +259,7 @@ export class ClassesService {
             percentage,
             label: `${completedSessions}/${totalSessions} Sessions Completed`,
           },
-          upcomingSessions: sessions
-            .filter((session) => ['live', 'upcoming'].includes(session.status))
-            .slice(0, 3),
+          upcomingSessions: sessions.slice(0, 3),
           resources: course.resources.map((resource) => ({
             resourceId: resource.id,
             name: resource.name,
@@ -1007,7 +1005,7 @@ export class ClassesService {
     courseDuration?: number | null;
     classDuration: number;
   }) {
-    return course.courseDuration ?? course.classDuration;
+    return course.classDuration;
   }
 
   private getCourseLessonItems(course: {

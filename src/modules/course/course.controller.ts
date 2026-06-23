@@ -43,7 +43,7 @@ export class CourseController {
   @Roles(Role.TUTOR, Role.ADMIN)
   @ApiBearerAuth()
   @UseInterceptors(
-    FileInterceptor('imageFile', {
+    FileInterceptor('image', {
       storage: memoryStorage(),
       limits: { fileSize: 10 * 1024 * 1024 },
     }),
@@ -52,7 +52,7 @@ export class CourseController {
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     description:
-      'Create a course with multipart/form-data. Upload imageFile to store the course image in S3.',
+      'Create a course with multipart/form-data. Upload image to store the course image in S3.',
     schema: {
       type: 'object',
       required: [
@@ -91,12 +91,6 @@ export class CourseController {
         requirement: { type: 'string', example: 'Basic Python knowledge' },
         image: {
           type: 'string',
-          example: 'https://example.com/course.png',
-          description:
-            'Optional existing image URL or base64 data URL. Ignored when imageFile is uploaded.',
-        },
-        imageFile: {
-          type: 'string',
           format: 'binary',
           description:
             'Optional course image file. Supported: JPEG, PNG, WebP, GIF. Max 10MB. Uploaded to S3.',
@@ -133,12 +127,12 @@ export class CourseController {
   createCourse(
     @Body() createCourseDto: CreateCourseDto,
     @CurrentUser() user: { userId: string },
-    @UploadedFile() imageFile?: any,
+    @UploadedFile() image?: any,
   ) {
     return this.courseService.createCourse(
       user.userId,
       createCourseDto,
-      imageFile,
+      image,
     );
   }
 

@@ -52,6 +52,7 @@ async function bootstrap() {
   const allowedOrigins = Array.from(
     new Set([
       ...configuredOrigins,
+      'https://braens.eu',
       'https://braens.vercel.app',
       'http://localhost:5173',
       'http://localhost:5174',

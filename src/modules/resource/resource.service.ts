@@ -143,14 +143,22 @@ export class ResourceService {
   private uploadResourceFile(file: any) {
     return this.s3StorageService.uploadFile(file, {
       folder: 'daanklerk/resources',
-      resourceType: 'raw',
+      resourceType: 'auto',
       allowedMimeTypes: [
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'image/gif',
+        'image/svg+xml',
         'application/pdf',
         'application/msword',
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'application/vnd.ms-powerpoint',
         'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'text/plain',
+        'text/csv',
       ],
       maxBytes: 20 * 1024 * 1024,
     });
